@@ -1,11 +1,6 @@
 
 # PROJECT Design Documentation
 
-> _The following template provides the headings for your Design
-> Documentation.  As you edit each section make sure you remove these
-> commentary 'blockquotes'; the lines that start with a > character
-> and appear in the generated PDF in italics._
-
 ## Team Information
 
 * Team name: all4all
@@ -48,13 +43,9 @@ Our Minimum Viable Product for all4all includes event management, event registra
 This section describes the application architecture.
 
 ### Software Architecture
-> _Place a architectural diagram here._
-> _Describe your software architecture._
 ![Architecture Diagram](images/architecture_diagram.png)
 For our architectural pattern block diagram, we chose to do a layered architecture diagram. A layered architecture diagram most resembles our browser and how our data will flow in our program. This gives us the advantage to also see related functionality between layers so we are able to see functionality related between the UI, business logic, and the database. Additionally, this architecture allows our program to do future work and make changes easier. It is easier to swap out components and view how the functionality will change between parts of the system. 
 
 ### Use Cases
-> _Place a use case diagram here._
-> _Describe your use case diagram._
 ![Use Case Diagram](images/use_case_diagram.png)
 Our use case diagram demonstrates the use cases performed by both of our types of users. Based on our top MVP stories, we have a group/organization user and a volunteer user. Our volunteer users will be able to register for an event, unregister for an event, search for events, log into their accounts, create their account, view volunteering events, and can view the number of users signed up for the event. Additionally, group/organization users can create an organization account, log into their group account, create a volunteer event, edit a volunteer event, delete a volunteer event, tag a volunteer event, and categorize a volunteer event. These stories are represented in our use case diagram demonstrated below. 
