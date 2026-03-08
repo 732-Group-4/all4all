@@ -2,14 +2,14 @@ import { useState, useRef } from "react";
 import Field from "./shared/Field";
 import TextInput from "./shared/TextInput";
 import ColorWheelPicker from "./ColorWheelPicker";
-import { useAsync } from "../utils/useAsync";
+import { useAsync } from "../../backend/login_utils/useAsync";
 import {
   validateUsernameFormat, isUsernameAvailable,
   validateEmail, isEmailAvailable,
   validatePhone, formatPhone,
   validateZip,
-} from "../utils/validators";
-import { _orgUsernames, _orgEmails, delay } from "../utils/store";
+} from "../../backend/login_utils/validators";
+import { _orgUsernames, _orgEmails, delay } from "../../backend/login_utils/store";
 
 export default function OrgForm({ onSwitch }) {
     const username = useAsync(validateUsernameFormat, isUsernameAvailable, "Username already taken.");

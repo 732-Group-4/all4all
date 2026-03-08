@@ -1,14 +1,14 @@
 import { useState } from "react";
 import Field from "./shared/Field";
 import TextInput from "./shared/TextInput";
-import { useAsync } from "../utils/useAsync";
+import { useAsync } from "../../backend/login_utils/useAsync";
 import { validateUsernameFormat, isUsernameAvailable,
   validateEmail, isEmailAvailable,
   validatePhone, formatPhone,
   validateZip, validatePassword,
-} from "../utils/validators";
-import { getPasswordStrength } from "../utils/passwordStrength";
-import { _users, _emails, delay } from "../utils/store";
+} from "../../backend/login_utils/validators";
+import { getPasswordStrength } from "../../backend/login_utils/passwordStrength";
+import { _users, _emails, delay } from "../../backend/login_utils/store";
 
 export default function VolunteerForm({ onSwitch }) {
     const firstName = useAsync((v) => (!v?.trim() ? "First name is required." : v.trim().length < 2 ? "Too short." : null), null, "");

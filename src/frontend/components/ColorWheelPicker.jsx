@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { isValidHex, normalizeHex } from "../utils/validators";
+import { isValidHex, normalizeHex } from "../../backend/login_utils/validators";
 
 export default function ColorWheelPicker({ selectedColors, onChange }) {
     const [wheelColor, setWheelColor] = useState("#16a34a");
