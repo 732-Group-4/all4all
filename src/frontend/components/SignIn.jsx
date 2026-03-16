@@ -3,7 +3,6 @@ import TextInput from "./shared/TextInput";
 import {useAuth} from "../../backend/login_utils/AuthContext"
 import { _users, _orgUsernames, delay } from "../../backend/login_utils/store";
 
-// ─── Sign In form ─────────────────────────────────────────────────────────────
 export default function SignIn({ onSwitch, onNavigate }) {
   const { login } = useAuth();
   const [username, setUsername] = useState("");

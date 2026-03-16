@@ -9,7 +9,6 @@ import { validateUsernameFormat, isUsernameAvailable,
 import { getPasswordStrength } from "../../backend/login_utils/passwordStrength";
 import { _users, _emails, delay } from "../../backend/login_utils/store";
 
-// ─── Volunteer Registration form ──────────────────────────────────────────────
 export default function VolunteerForm({ onSwitch, onNavigate }) {
   const { login } = useAuth();
   const firstName = useAsync((v) => (!v?.trim() ? "First name is required." : v.trim().length < 2 ? "Too short." : null), null, "");
