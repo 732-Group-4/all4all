@@ -130,4 +130,4 @@ app.get("/api/checkEmail", async (req, res) => {
   }
 });
 
-app.listen(5000, () => console.log("API running on port 5000"));
+export default app;
