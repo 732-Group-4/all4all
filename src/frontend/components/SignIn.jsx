@@ -5,8 +5,8 @@ import { _users, delay } from "../../backend/login_utils/store";
 
 export default function SignIn({ onSwitch }) {
   const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [token, setToken] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -21,21 +21,34 @@ export default function SignIn({ onSwitch }) {
     setError(null);
     await delay(500);
 
-    // TODO: replace with a real API call once backend done
-    // TODO: This is bad security, never ever tell someone the password
-    // wrong, then they can just keep guessing, always say, username or
-    // password is incorrect, not one or the other
-    const user = _users.get(username.toLowerCase());
-    if (!user) {
-      setError("Username not found.");
+    try {
+      const res = await fetch("/api/registerVolunteer", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          username: username.val,
+          password: password.val
+        }),
+      });
       setLoading(false);
-      return;
-    }
 
-    if (user.password !== password) {
-      setError("Incorrect password.");
-      setLoading(false);
-      return;
+
+      const data = await res.json();
+      if (!res.ok) {
+        setSuccess(false);
+        throw new Error(data.message);
+      }
+      setToken(data.token)
+      setUsername(data.user.username);
+      console.log("Successfully signed in user:", data.user.username);
+
+      setSuccess(true);
+
+    } catch (err) {
+      console.error(err);
+      setSubmitErr("Failed to create account. Please try again.");
     }
     setLoading(false);
     setSuccess(true);
