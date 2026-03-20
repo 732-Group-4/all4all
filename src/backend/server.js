@@ -31,6 +31,8 @@ async function createUser(client, username, email, password, phone, role) {
 */
 app.post("/api/registerVolunteer", async (req, res) => {
   const client = await pool.connect();
+  let transactionStarted = false;
+
 
   try {
     const { username, email, password, firstName, lastName, phone } = req.body;
@@ -40,22 +42,26 @@ app.post("/api/registerVolunteer", async (req, res) => {
     }
 
     await client.query("BEGIN");
+    transactionStarted = true;
 
     const user_id = await createUser(client, username, email, password, phone, "VOLUNTEER");
 
     const full_name = `${firstName} ${lastName}`;
 
-    await client.query(
-      "INSERT INTO volunteers(user_id,full_name) VALUES($1,$2)",
+    const volunteerResult = await client.query(
+      "INSERT INTO volunteers(user_id,full_name) VALUES($1,$2) RETURNING id",
       [user_id, full_name]
     );
 
     await client.query("COMMIT");
+    transactionStarted = false;
 
-    res.json({ id: user_id });
+    res.json({ id: volunteerResult.rows[0].id });
 
   } catch (err) {
-    await client.query("ROLLBACK");
+    if (transactionStarted) {
+      await client.query("ROLLBACK");
+    }
 
     if (err.code === "23505") {
       return res.status(409).json({ error: "User already exists" });
