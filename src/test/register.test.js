@@ -61,71 +61,26 @@ describe("Volunteer registration", () => {
 });
 
 /**
- * Tests endpoint for creating events
- * /api/events
- * Creates a test organization first
+ * Tests endpoint for unregistering volunteers from events
+ * /api/events/:id/register
  */
-describe("Event creation", () => {
-  it("should create an event in DRAFT status", async () => {
+describe("Volunteer unregister", () => {
+  it("should unregister a volunteer from an event", async () => {
     const unique = Date.now();
 
-    const orgRes = await request(app)
-      .post("/api/registerOrg")
+    // Create volunteer
+    const volunteerRes = await request(app)
+      .post("/api/registerVolunteer")
       .send({
-        name: `org${unique}`,
-        email: `org${unique}@test.com`,
-        phone: "555-1111",
-        description: "Test organization",
+        username: `vol${unique}`,
+        email: `vol${unique}@test.com`,
         password: "pass123",
-        category_id: 1,
-        zip_code: "14623"
+        firstName: "Jane",
+        lastName: "Doe",
+        phone: "555-1234"
       });
 
-    console.log("Org:", orgRes.statusCode, orgRes.body);
-
-    expect(orgRes.statusCode).toBe(200);
-    expect(orgRes.body).toHaveProperty("id");
-
-    const eventRes = await request(app)
-      .post("/api/events")
-      .send({
-        organization_id: orgRes.body.id,
-        name: "Community Cleanup",
-        description: "Cleaning local park",
-        start_time: "2026-04-01T10:00:00Z",
-        end_time: "2026-04-01T12:00:00Z",
-        address: "100 Main St",
-        city: "Rochester",
-        state: "NY",
-        zip_code: "14623"
-      });
-
-    console.log("Event:", eventRes.statusCode, eventRes.body);
-
-    expect(eventRes.statusCode).toBe(200);
-    expect(eventRes.body).toHaveProperty("id");
-  });
-
-  it("should return 400 when required fields are missing", async () => {
-  const res = await request(app)
-    .post("/api/events")
-    .send({
-      name: "Incomplete Event"
-    });
-
-  console.log("Missing fields:", res.statusCode, res.body);
-
-  expect(res.statusCode).toBe(400);
-  });
-});
-
-/**
- * Tests endpoint for publishing events
- * /api/events/:id/publish
- */
-describe("Event publishing", () => {
-  it("should publish an event", async () => {
-    const unique = Date.now();
+    expect(volunteerRes.statusCode).toBe(200);
 
     // Create organization
     const orgRes = await request(app)
@@ -147,10 +102,10 @@ describe("Event publishing", () => {
       .post("/api/events")
       .send({
         organization_id: orgRes.body.id,
-        name: "Publish Test Event",
-        description: "Testing publish",
-        start_time: "2026-04-02T10:00:00Z",
-        end_time: "2026-04-02T12:00:00Z",
+        name: "Unregister Test Event",
+        description: "Testing unregister",
+        start_time: "2026-04-05T10:00:00Z",
+        end_time: "2026-04-05T12:00:00Z",
         address: "100 Main St",
         city: "Rochester",
         state: "NY",
@@ -160,20 +115,38 @@ describe("Event publishing", () => {
     expect(eventRes.statusCode).toBe(200);
 
     // Publish event
-    const publishRes = await request(app)
+    await request(app)
       .put(`/api/events/${eventRes.body.id}/publish`);
 
-    console.log("Publish:", publishRes.statusCode, publishRes.body);
+    // Register volunteer
+    await request(app)
+      .post(`/api/events/${eventRes.body.id}/register`)
+      .send({
+        volunteer_id: volunteerRes.body.id
+      });
 
-    expect(publishRes.statusCode).toBe(200);
-    expect(publishRes.body).toHaveProperty("success", true);
+    // Unregister volunteer
+    const unregisterRes = await request(app)
+      .delete(`/api/events/${eventRes.body.id}/register`)
+      .send({
+        volunteer_id: volunteerRes.body.id
+      });
+
+    console.log("Unregister:", unregisterRes.statusCode, unregisterRes.body);
+
+    expect(unregisterRes.statusCode).toBe(200);
+    expect(unregisterRes.body).toHaveProperty("success", true);
   });
-  it("should return 404 when publishing a nonexistent event", async () => {
-  const res = await request(app)
-    .put("/api/events/999999/publish");
 
-  console.log("Publish fail:", res.statusCode, res.body);
+  it("should return 404 when unregistering nonexistent registration", async () => {
+    const res = await request(app)
+      .delete("/api/events/999999/register")
+      .send({
+        volunteer_id: 999999
+      });
 
-  expect(res.statusCode).toBe(404);
+    console.log("Unregister fail:", res.statusCode, res.body);
+
+    expect(res.statusCode).toBe(404);
   });
 });
