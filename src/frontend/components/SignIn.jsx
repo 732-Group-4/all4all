@@ -22,24 +22,22 @@ export default function SignIn({ onSwitch }) {
     await delay(500);
 
     try {
-      const res = await fetch("/api/registerVolunteer", {
+      const res = await fetch("/api/login", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          username: username.val,
-          password: password.val
+          username: username,
+          password: password
         }),
       });
-      setLoading(false);
 
-
-      const data = await res.json();
       if (!res.ok) {
-        setSuccess(false);
-        throw new Error(data.message);
+        const message = await res.text();
+        throw new Error(message);
       }
+      const data = await res.json();
       setToken(data.token)
       setUsername(data.user.username);
       console.log("Successfully signed in user:", data.user.username);
@@ -48,10 +46,10 @@ export default function SignIn({ onSwitch }) {
 
     } catch (err) {
       console.error(err);
-      setSubmitErr("Failed to create account. Please try again.");
+      setError(err);
+      setSuccess(false);
     }
     setLoading(false);
-    setSuccess(true);
   }
 
   if (success) return (
@@ -83,7 +81,7 @@ export default function SignIn({ onSwitch }) {
         />
       </Field>
 
-      {error && <p className="a4a-err">{error}</p>}
+      {error && <p className="a4a-err">{error.message}</p>}
 
       <button type="button" className="a4a-btn" disabled={loading} onClick={handleSubmit}>
         {loading ? "Signing in…" : "Sign In"}
