@@ -22,6 +22,9 @@ export default function SignIn({ onSwitch }) {
     await delay(500);
 
     // TODO: replace with a real API call once backend done
+    // TODO: This is bad security, never ever tell someone the password
+    // wrong, then they can just keep guessing, always say, username or
+    // password is incorrect, not one or the other
     const user = _users.get(username.toLowerCase());
     if (!user) {
       setError("Username not found.");

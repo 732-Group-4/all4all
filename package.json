@@ -10,7 +10,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest",
-    "test:e2e": "start-server-and-test dev http://localhost:5173 'jest tests/'"
+    "test:e2e": "start-server-and-test dev http://localhost:5173 'jest tests/ --watchAll=false'"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
