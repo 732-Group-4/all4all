@@ -122,6 +122,8 @@ describe("Home Page", () => {
     );
     await buttons[0].click();
 
+    let error;
+
      // Wait for the error message to appear and assert
     error = await driver.wait(
       until.elementLocated(By.className("a4a-err")),
