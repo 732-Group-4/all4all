@@ -125,3 +125,30 @@ describe("Login", () => {
     expect(new_res.text).toBe("Invalid username or password.")
   });
 });
+
+
+/**
+ * Tests endpoint for orgCategories
+ * /api/orgCategories
+ * Requires docker container of SQL database for tests to run (docker compose up)
+ */
+describe("orgCategories", () => {
+  /**
+   * /api/orgCategories returns a list of the correct length
+   */
+  it("should return the correct categories", async () => {
+
+    //Send all required registration arguments in a post request and await response
+    const res = await request(app)
+      .get("/api/orgCategories");
+
+    //Log status and response contents for debugging
+    console.log("OrgCategories repsonse:", res.statusCode, res.body);
+
+    expect(res.statusCode).toBe(200);
+
+    // TODO: Not sure if this is the best thing to test -- if we add any more categories, test will need to change
+    expect(res.body).toHaveProperty("length");
+    expect(res.body.length).toBe(12);
+  });
+});
