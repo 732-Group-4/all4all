@@ -1,11 +1,16 @@
 import { useState } from "react";
+import { Routes, Route } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import "./login_css_vals.css";
 
 import SignIn from "./components/SignIn";
 import VolunteerForm from "./components/VolunteerForm";
 import OrgForm from "./components/OrgForm";
+import VolunteerHome from "./components/VolunteerHome";
+import ProfilePage from "./components/ProfilePage";
 
-export default function App() {
+// ── Login page (tabs for sign in / register) ──────────────────────────────────
+function LoginPage() {
   const [tab, setTab] = useState("signin");
 
   const tabConfig = [
@@ -18,7 +23,6 @@ export default function App() {
     <div className="a4a-page">
       <div className="a4a-card">
 
-        {/* header TODO: add logo later?*/}
         <div className="a4a-header">
           <div className="a4a-logo">All4All</div>
           <div className="a4a-tagline">Connecting volunteers with organizations that need them most.</div>
@@ -36,7 +40,6 @@ export default function App() {
           ))}
         </div>
 
-        {/* tabs for logiging in and creating account*/}
         <div className="a4a-body">
           {tab === "signin"    && <SignIn        onSwitch={setTab} />}
           {tab === "volunteer" && <VolunteerForm onSwitch={setTab} />}
@@ -45,5 +48,18 @@ export default function App() {
 
       </div>
     </div>
+  );
+}
+
+// ── App with routes ───────────────────────────────────────────────────────────
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/"     element={<LoginPage />} />
+      <Route path="/home" element={<VolunteerHome />} />
+      <Route path="/profile" element={<ProfilePage />} />
+      {/* <Route path="/org-home" element={<OrgHome />} /> */}
+      {/* <Route path="/profile"  element={<Profile />} /> */}
+    </Routes>
   );
 }

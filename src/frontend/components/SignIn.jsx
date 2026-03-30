@@ -1,15 +1,15 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import Field from "./shared/Field";
 import TextInput from "./shared/TextInput";
-import { _users, delay } from "../../backend/login_utils/store";
 
 export default function SignIn({ onSwitch }) {
+  const navigate = useNavigate();
+
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [token, setToken] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [success, setSuccess] = useState(false);
 
   async function handleSubmit() {
     if (!username || !password) {
@@ -19,45 +19,42 @@ export default function SignIn({ onSwitch }) {
 
     setLoading(true);
     setError(null);
-    await delay(500);
 
     try {
       const res = await fetch("/api/login", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          username: username,
-          password: password
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
       });
 
       if (!res.ok) {
         const message = await res.text();
         throw new Error(message);
       }
+
       const data = await res.json();
-      setToken(data.token)
-      setUsername(data.user.username);
+
+      // Save session to localStorage
+      localStorage.setItem("token", data.token);
+      localStorage.setItem("user", JSON.stringify(data.user));
+
       console.log("Successfully signed in user:", data.user.username);
 
-      setSuccess(true);
+      // Redirect based on role
+      if (data.user.role === "VOLUNTEER") {
+        navigate("/home");
+
+      } else if (data.user.role === "ORGANIZATION") {
+        navigate("/org-home"); // build this page later
+      }
 
     } catch (err) {
       console.error(err);
       setError(err);
-      setSuccess(false);
     }
+
     setLoading(false);
   }
-
-  if (success) return (
-    <div className="a4a-success">
-      Welcome back, <strong>{username}</strong>!<br />
-      <span>You are now signed in.</span>
-    </div>
-  );
 
   return (
     <div>
