@@ -450,4 +450,36 @@ app.get("/api/volunteers/:id", async (req, res) => {
   }
 });
 
+app.get("/api/full_name", async (req, res) => {
+  try {
+    const { user_id } = req.query; // ✅ use query params
+    let org = false;               // ✅ let instead of const
+    let result = await pool.query(
+      "SELECT full_name FROM volunteers WHERE user_id = $1",
+      [user_id]
+    );
+    if (result.rowCount === 0) {
+      org = true;
+      result = await pool.query(
+        "SELECT full_name FROM organizations WHERE user_id = $1",
+        [user_id]
+      );
+    }
+    if (result.rowCount === 0) {
+      return res.status(404).send("User ID not found."); // ✅ return to stop execution
+    }
+
+    let name = null;              // ✅ let instead of const
+    if (org) {
+      name = result.rows[0].name;
+    } else {
+      name = result.rows[0].full_name;
+    }
+    res.json({ name });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Database error");
+  }
+});
+
 export default app;

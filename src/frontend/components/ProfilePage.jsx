@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import AvatarIcon from "./profile/AvatarIcon";
 import Field from "./shared/Field";
@@ -39,6 +39,24 @@ export default function ProfilePage() {
 
   // ── Avatar (volunteers only) ──
   const fileRef = useRef(null);
+
+  // ── Display name ──                        👇 ADD FROM HERE
+  const [displayName, setDisplayName] = useState("");
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    fetch(`/api/full_name?user_id=${user.id}`)
+      .then(res => res.json())
+      .then(data => {
+        setDisplayName(data.name);
+        const [firstName, ...rest] = data.name.split(" ");
+        const lastName = rest.join(" ");
+        setForm(f => ({ ...f, firstName, lastName }));
+      })
+      .catch(err => console.error("Error fetching name:", err));
+  }, []);
+                                              // 👆 TO HERE
 
   const str = getPasswordStrength(newPass);
 
@@ -146,9 +164,21 @@ export default function ProfilePage() {
     setEditing(false);
   }
 
-  const displayName = isVolunteer
-    ? `${user.full_name}`
-    : user.bizName;
+  //const displayName = isVolunteer
+  //  ? `${user.full_name}`
+  //  : user.bizName;
+
+  //const [displayName, setDisplayName] = useState("");
+
+  /*useEffect(() => {
+    const user = JSON.parse(localStorage.getItem("user") || "null");
+    if (!user?.id) return;
+
+    fetch(`/api/full_name?user_id=${user.id}`)
+      .then(res => res.json())
+      .then(data => setDisplayName(data.name))
+      .catch(err => console.error("Error fetching name:", err));
+  }, []);*/
 
   return (
     <div className="prof-page">
@@ -235,7 +265,7 @@ export default function ProfilePage() {
                     placeholder="Jane"
                   />
                 ) : (
-                  <div className="prof-value">{user.firstName}</div>
+                  <div className="prof-value">{form.firstName}</div>
                 )}
               </Field>
               <Field label="Last Name" error={errors.lastName}>
@@ -247,7 +277,7 @@ export default function ProfilePage() {
                     placeholder="Doe"
                   />
                 ) : (
-                  <div className="prof-value">{user.lastName}</div>
+                  <div className="prof-value">{form.lastName}</div>
                 )}
               </Field>
             </div>
