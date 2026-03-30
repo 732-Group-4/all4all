@@ -425,6 +425,7 @@ app.post("/api/login", async (req, res) => {
       const user_id = result.rows[0].id;
       const token = jwt.sign(
         { id: user_id, role: user_role },
+        // eslint-disable-next-line no-undef
         process.env.JWT_SECRET,
         { expiresIn: "7d" }
       );
