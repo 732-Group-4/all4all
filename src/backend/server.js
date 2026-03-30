@@ -257,7 +257,8 @@ app.get("/api/events/:id", async (req, res) => {
   }
 });
 
-/* Get all of the events linked to the specified organization id
+/*
+  Get all of the events linked to the specified organization id
   publishedOnly = false (default): Used for organizations to view all of their own events 
   publishedOnly = true: Used for volunteers to view all published events for a specific organization (filter)
 
@@ -440,36 +441,6 @@ app.post("/api/login", async (req, res) => {
         }
       });
     }
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Database error");
-  }
-});
-
-/* Get number of registered volunteers for an event
- */
-app.get("/api/events/:id/count", async (req, res) => {
-  try {
-    const event_id = req.params.id;
-
-    // Check event exists
-    const eventResult = await pool.query(
-      "SELECT status, organization_id FROM events WHERE id = $1",
-      [event_id]
-    );
-
-    if (eventResult.rowCount === 0) {
-      return result.status(404).send("Event not found");
-    }
-
-    let query = `SELECT COUNT(*) FROM event_registrations WHERE event_id = $1`;
-
-    const params = [req.params.id];
-
-    const result = await pool.query(query, params);
-    const count = parseInt(result.rows[0].count, 10);
-    res.json({ count });
 
   } catch (err) {
     console.error(err);
