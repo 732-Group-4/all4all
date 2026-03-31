@@ -191,9 +191,12 @@ export default function ProfilePage() {
         <button className="prof-nav__logo" onClick={() => navigate("/home")}>
           All4All
         </button>
-        <button className="prof-nav__back" onClick={() => navigate("/home")}>
-          Back to Home
-        </button>
+        <button 
+            className="prof-nav__back" 
+            onClick={() => navigate(isVolunteer ? "/home" : "/org-home")}
+          >
+            Back to Home
+          </button>
       </nav>
 
       <div className="prof-content">
