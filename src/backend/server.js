@@ -243,10 +243,6 @@ app.get("/api/events/:id", async (req, res) => {
   Get all of the events linked to the specified organization id
   publishedOnly = false (default): Used for organizations to view all of their own events 
   publishedOnly = true: Used for volunteers to view all published events for a specific organization (filter)
-
-  Examples:
-  Org 1:                          GET /api/organizations/1/events
-  Volunteer (filter for org 1):   GET /api/organizations/1/events?publishedOnly=true
 */
 app.get("/api/organizations/:id/events", async (req, res) => {
   try {
@@ -452,8 +448,8 @@ app.get("/api/volunteers/:id", async (req, res) => {
 
 app.get("/api/full_name", async (req, res) => {
   try {
-    const { user_id } = req.query; // ✅ use query params
-    let org = false;               // ✅ let instead of const
+    const { user_id } = req.query; 
+    let org = false;              
     let result = await pool.query(
       "SELECT full_name FROM volunteers WHERE user_id = $1",
       [user_id]
@@ -466,10 +462,10 @@ app.get("/api/full_name", async (req, res) => {
       );
     }
     if (result.rowCount === 0) {
-      return res.status(404).send("User ID not found."); // ✅ return to stop execution
+      return res.status(404).send("User ID not found."); 
     }
 
-    let name = null;              // ✅ let instead of const
+    let name = null;
     if (org) {
       name = result.rows[0].name;
     } else {
@@ -511,6 +507,14 @@ app.get("/api/orgCategories", async (req, res) => {
     console.error(err);
     res.status(500).send("Database error");
   }
+});
+
+app.get("/api/organizations/by-user/:userId", async (req, res) => {
+  const result = await pool.query(
+    "SELECT * FROM organizations WHERE user_id = $1", [req.params.userId]
+  );
+  if (result.rowCount === 0) return res.status(404).send("Not found");
+  res.json(result.rows[0]);
 });
 
 export default app;

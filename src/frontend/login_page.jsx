@@ -8,6 +8,7 @@ import VolunteerForm from "./components/VolunteerForm";
 import OrgForm from "./components/OrgForm";
 import VolunteerHome from "./components/VolunteerHome";
 import ProfilePage from "./components/ProfilePage";
+import OrgHome from "./components/OrgHome";
 
 // ── Login page (tabs for sign in / register) ──────────────────────────────────
 function LoginPage() {
@@ -58,7 +59,7 @@ export default function App() {
       <Route path="/"     element={<LoginPage />} />
       <Route path="/home" element={<VolunteerHome />} />
       <Route path="/profile" element={<ProfilePage />} />
-      {/* <Route path="/org-home" element={<OrgHome />} /> */}
+      <Route path="/org-home" element={<OrgHome />} />
       {/* <Route path="/profile"  element={<Profile />} /> */}
     </Routes>
   );

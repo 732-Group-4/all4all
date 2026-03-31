@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import ProfilePage from "./ProfilePage";
 
-// ─── Mock API helpers (replace URLs with real endpoints when ready) ───────────
 const API = {
   getVolunteer: async (userId) => {
     const res = await fetch(`/api/volunteers/${userId}`);
@@ -21,22 +20,24 @@ const API = {
   },
 };
 
-// ─── Tiny helpers ─────────────────────────────────────────────────────────────
 function initials(name = "") {
   return name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
 }
+
 function formatDate(iso) {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("en-US", {
     month: "short", day: "numeric", year: "numeric",
   });
 }
+
 function formatTime(iso) {
   if (!iso) return "";
   return new Date(iso).toLocaleTimeString("en-US", {
     hour: "numeric", minute: "2-digit",
   });
 }
+
 function calcHours(start, end) {
   if (!start || !end) return null;
   const diff = (new Date(end) - new Date(start)) / 36e5;
@@ -95,7 +96,6 @@ const MOCK_EVENTS = [
 const CATEGORIES = ["All", "Environment", "Food & Hunger", "Education", "Elder Care", "Health", "Animals"];
 const DISTANCES  = ["Any Distance", "< 1 mi", "< 2 mi", "< 5 mi", "< 10 mi"];
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
 
 function Avatar({ src, name, size = 38 }) {
   return src
@@ -247,10 +247,7 @@ function EventCard({ event, onRegister }) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function VolunteerHome() {
-    const navigate = useNavigate();
-
-  // Pull volunteerId from wherever you store session (see step 3)
-  //const volunteerId = 1; // temporary hardcode — replace in step 3
+  const navigate = useNavigate();
 
   const onNavigateProfile = () => navigate("/profile");
 
@@ -267,26 +264,25 @@ export default function VolunteerHome() {
   const searchRef = useRef();
 
   // Fetch volunteer info
-    useEffect(() => {
-  const user = JSON.parse(localStorage.getItem("user") || "null");
-  if (!user) {
-    navigate("/");
-    return;
-  }
-  API.getVolunteer(user.id)
-    .then(setVolunteer)
-    .catch(console.error)
-    .finally(() => setLoading(false));
-}, []);
+  useEffect(() => {
+    const user = JSON.parse(localStorage.getItem("user") || "null");
+    if (!user) {
+      navigate("/");
+      return;
+    }
+    API.getVolunteer(user.id)
+      .then(setVolunteer)
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, []);
 
-  // Fetch published events (falls back to mock data if server not running)
   useEffect(() => {
     API.getPublishedEvents()
       .then(setEvents)
-      .catch(() => setEvents(MOCK_EVENTS)); // graceful fallback
+      .catch(() => setEvents(MOCK_EVENTS)); 
   }, []);
 
-  // ── Filtering ──
+  // Filtering 
   const filtered = events.filter(ev => {
     const q = search.toLowerCase();
     const matchSearch =
@@ -309,8 +305,7 @@ export default function VolunteerHome() {
 
   // ── Register handler ──
   function handleRegister(event) {
-    // TODO: wire to POST /api/events/:id/register with { volunteer_id }
-    setToast(`Registered for "${event.name}"! 🎉`);
+    setToast(`Registered for "${event.name}"!`);
     setTimeout(() => setToast(null), 3500);
   }
 
@@ -381,7 +376,7 @@ export default function VolunteerHome() {
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
             <Avatar src={volunteer?.profile_pic} name={volunteer?.full_name} size={52} />
             <div>
-              <p style={{ fontSize: 13, color: "#64748b", fontWeight: 500 }}>Welcome back 👋</p>
+              <p style={{ fontSize: 13, color: "#64748b", fontWeight: 500 }}>Welcome back!</p>
               <h2 style={{ fontSize: 22, fontWeight: 900, color: "#1e293b", lineHeight: 1.2 }}>
                 {volunteer?.full_name}
               </h2>
@@ -426,7 +421,7 @@ export default function VolunteerHome() {
               display: "flex", alignItems: "center", gap: 6,
               transition: "all 0.18s",
             }}>
-              ⚙️ Filters {showFilters ? "▲" : "▼"}
+              Filters {showFilters ? "▲" : "▼"}
             </button>
           </div>
 
