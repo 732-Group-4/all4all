@@ -397,11 +397,11 @@ app.post("/api/login", async (req, res) => {
       [username]
     );
 
-    const { id, email, role} = result.rows[0];
-
     if (result.rowCount === 0 || !(await bcrypt.compare(password, result.rows[0].password_hash))) {
       return res.status(401).send("Invalid email or password.");
     }
+
+    const { id, email, role} = result.rows[0];
 
     const token = jwt.sign(
       { id, email, role },
@@ -457,7 +457,7 @@ app.get("/api/full_name", async (req, res) => {
     if (result.rowCount === 0) {
       org = true;
       result = await pool.query(
-        "SELECT full_name FROM organizations WHERE user_id = $1",
+        "SELECT name FROM organizations WHERE user_id = $1",
         [user_id]
       );
     }
