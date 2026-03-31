@@ -25,6 +25,7 @@ export default function OrgForm({ onSwitch }) {
     const [password,setPassword] = useState("");
     const [passErr, setPassErr] = useState(null);
     const [showPass, setShowPass]= useState(false);
+    const [confirm, setConfirm] = useState("");
     const [confirmErr, setConfirmErr] = useState(null);
     const str = getPasswordStrength(password);
 
@@ -125,9 +126,10 @@ export default function OrgForm({ onSwitch }) {
                     name: username.val,
                     email: email.val,
                     phone: phoneRaw,
-                    description: motto.val, //TODO: orgs need descriptions in the db
+                    description: motto, //TODO: orgs need descriptions in the db
                     password: password, //TODO: do organizations need passwords too? Org needs user_id and user needs password
-                    category_id: categoryId //TODO: require user input for organization category (based on options in db)
+                    category_id: categoryId, //TODO: require user input for organization category (based on options in db)
+                    zip_code: zip
                 }),
             });
 
