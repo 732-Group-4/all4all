@@ -280,10 +280,13 @@ function EventModal({ event, orgId, onClose, onSaved }) {
     if (Object.keys(errs).length) { setErrors(errs); return; }
     setLoading(true);
     setSubmitErr(null);
+
     try {
-      const payload = { ...form, status, organization_id: orgId };
+      const payload = { organization_id: orgId, ...form };
       const url = isEdit ? `/api/events/${event.id}` : "/api/events";
       const method = isEdit ? "PUT" : "POST";
+
+      // Step 1: Always save the event first
       const res = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
@@ -291,12 +294,30 @@ function EventModal({ event, orgId, onClose, onSaved }) {
       });
       if (!res.ok) throw new Error("Failed to save event");
       const saved = await res.json();
-      onSaved(saved, isEdit);
+
+      // Step 2: If publishing, call the publish route after saving
+      if (status === "PUBLISHED") {
+        const eventId = isEdit ? event.id : saved.id;
+        const pubRes = await fetch(`/api/events/${eventId}/publish`, {
+          method: "PUT",
+        });
+        if (!pubRes.ok) throw new Error("Failed to publish event");
+      }
+
+      // Step 3: Build the full event object to pass back to the parent
+      const fullEvent = {
+        ...form,
+        id: saved.id,
+        status: status,
+      };
+
+      onSaved(fullEvent, isEdit);
       onClose();
     } catch (err) {
       console.error(err);
       setSubmitErr("Failed to save event. Please try again.");
     }
+
     setLoading(false);
   }
 
