@@ -2,6 +2,7 @@ import request from "supertest";
 import { describe, it, expect } from "vitest";
 import { setTimeout } from 'node:timers/promises';
 import app from "../backend/server";
+import { randomUUID } from "crypto";
 
 /**
  * Tests endpoint for email validation
@@ -584,10 +585,11 @@ describe("Login", () => {
     // The following is borrowed from the volunteer registration test, to create a volunteer for login
     // Would be better to use a fixture, but I don't know how to do that with vitest :)
 
-    await setTimeout(1);
+    //await setTimeout(1);
+    const unique = randomUUID();
     //Uses Date.now() to ensure that email and username are always unique
-    const uniqueEmail = `test${Date.now()}@test.com`;
-    const uniqueUsername = `test${Date.now()}`;
+    const uniqueEmail = `test${unique}@test.com`;
+    const uniqueUsername = `test${unique}`;
 
     //Send all required registration arguments in a post request and await response
     const res = await request(app)
