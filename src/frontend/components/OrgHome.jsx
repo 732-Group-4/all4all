@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import logo from "../../assets/all4allLogo.png";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function initials(name = "") {
@@ -19,8 +20,9 @@ function calcHours(start, end) {
   return diff > 0 ? diff.toFixed(1) : null;
 }
 
+
 // ─── Mock data ────────────────────────────────────────────────────────────────
-const MOCK_EVENTS = [
+/*const MOCK_EVENTS = [
   {
     id: 1, name: "River Cleanup Drive", status: "PUBLISHED",
     description: "Join us for a morning cleaning up litter along the Genesee River trail.",
@@ -48,6 +50,11 @@ const MOCK_EVENTS = [
 ];
 
 const CATEGORIES = ["All", "Environment", "Food & Hunger", "Education", "Elder Care", "Health", "Animals"];
+
+const DISTANCES  = ["Any Distance", "< 1 mi", "< 2 mi", "< 5 mi", "< 10 mi"];
+const US_STATES  = ["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"];
+*/
+
 const DISTANCES  = ["Any Distance", "< 1 mi", "< 2 mi", "< 5 mi", "< 10 mi"];
 const US_STATES  = ["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"];
 
@@ -85,14 +92,22 @@ function StatBadge({ value, label, color = "#2563eb" }) {
 
 function CategoryPill({ label, active, onClick }) {
   return (
-    <button onClick={onClick} style={{
-      padding: "6px 14px", borderRadius: 99, border: "none", cursor: "pointer",
-      fontFamily: "inherit", fontSize: 12.5, fontWeight: active ? 700 : 500,
-      background: active ? "#2563eb" : "#f1f5f9",
-      color: active ? "#fff" : "#475569",
-      transition: "all 0.18s", whiteSpace: "nowrap",
-      boxShadow: active ? "0 2px 8px rgba(37,99,235,0.22)" : "none",
-    }}>
+    <button
+      onClick={onClick}
+      style={{
+        padding: "6px 14px",
+        borderRadius: 99,
+        border: "none",
+        cursor: "pointer",
+        fontFamily: "inherit",
+        fontSize: 12.5,
+        fontWeight: active ? 700 : 500,
+        background: active ? "#15803d" : "#f1f5f9",  // highlight active
+        color: active ? "#fff" : "#475569",
+        transition: "all 0.18s",
+        whiteSpace: "nowrap",
+        boxShadow: active ? "0 2px 8px rgba(37,99,235,0.22)" : "none",
+      }}>
       {label}
     </button>
   );
@@ -379,7 +394,7 @@ function EventModal({ event, orgId, onClose, onSaved }) {
           </button>
           <button onClick={() => handleSubmit("PUBLISHED")} disabled={loading} style={{
             flex: 2, padding: "10px 0", borderRadius: 10, border: "none",
-            background: "linear-gradient(135deg,#2563eb,#1d4ed8)", color: "#fff",
+            background: "linear-gradient(135deg,#15803d,#15803d)", color: "#fff",
             fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
             boxShadow: "0 2px 8px rgba(37,99,235,0.25)",
           }}>
@@ -396,12 +411,12 @@ export default function OrgHome() {
   const navigate = useNavigate();
 
   const [org, setOrg]                 = useState(null);
-  const [allEvents, setAllEvents]     = useState(MOCK_EVENTS);
+  const [allEvents, setAllEvents] = useState([]);
   const [myEvents, setMyEvents]       = useState([]);
   const [loading, setLoading]         = useState(true);
   const [tab, setTab]                 = useState("browse"); // "browse" | "my-events"
   const [search, setSearch]           = useState("");
-  const [activeCategory, setCategory] = useState("All");
+  const [activeCategories, setActiveCategories] = useState(["All"]);
   const [distanceFilter, setDistance] = useState("Any Distance");
   const [dateFrom, setDateFrom]       = useState("");
   const [dateTo, setDateTo]           = useState("");
@@ -413,6 +428,33 @@ export default function OrgHome() {
 
   const user = JSON.parse(localStorage.getItem("user") || "null");
 
+  const [categories, setCategories] = useState([]);
+  const [categoryErr, setCategoryErr] = useState(null);
+
+  function toggleCategory(category) {
+    setActiveCategories(prev => {
+      // Make sure prev is always an array
+      const arr = Array.isArray(prev) ? prev : [];
+
+      if (category === "All") return ["All"];
+
+      const next = arr.includes(category)
+        ? arr.filter(c => c !== category)               // remove if already active
+        : [...arr.filter(c => c !== "All"), category];  // add new
+
+      return next.length ? next : ["All"];             // fallback to All if empty
+    });
+  }
+
+  useEffect(() => {
+    fetch("/api/orgCategories")
+      .then((res) => res.json())
+      .then((data) => {
+        // Ensure "All" is always first
+        setCategories(["All", ...data]);
+      })
+      .catch(() => setCategoryErr("Could not load categories."));
+  }, []);
   useEffect(() => {
     if (!user) { navigate("/"); return; }
 
@@ -427,7 +469,10 @@ export default function OrgHome() {
     fetch("/api/events")
       .then(r => r.json())
       .then(setAllEvents)
-      .catch(() => setAllEvents(MOCK_EVENTS));
+      .catch((err) => {
+        console.error("Failed to fetch events:", err);
+        setAllEvents([]);
+      });
   }, []);
 
   useEffect(() => {
@@ -469,7 +514,9 @@ export default function OrgHome() {
   const filtered = allEvents.filter(ev => {
     const q = search.toLowerCase();
     const matchSearch = !q || ev.name?.toLowerCase().includes(q) || ev.description?.toLowerCase().includes(q) || ev.organization_name?.toLowerCase().includes(q);
-    const matchCat = activeCategory === "All" || ev.category === activeCategory;
+    const matchCat =
+    activeCategories.length === 0 ||   // nothing selected = show all
+    activeCategories.includes(ev.category);
     const maxDist = { "< 1 mi": 1, "< 2 mi": 2, "< 5 mi": 5, "< 10 mi": 10 }[distanceFilter];
     const matchDist = !maxDist || (ev.distance_miles != null && ev.distance_miles < maxDist);
     const matchFrom = !dateFrom || new Date(ev.start_time) >= new Date(dateFrom);
@@ -480,7 +527,7 @@ export default function OrgHome() {
   if (loading) {
     return (
       <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(135deg,#eff6ff 0%,#dbeafe 40%,#bfdbfe 100%)" }}>
-        <div style={{ color: "#2563eb", fontWeight: 700, fontSize: 16 }}>Loading…</div>
+        <div style={{ color: "#15803d", fontWeight: 700, fontSize: 16 }}>Loading…</div>
       </div>
     );
   }
@@ -491,7 +538,7 @@ export default function OrgHome() {
   return (
     <div style={{
       minHeight: "100vh",
-      background: "linear-gradient(135deg,#eff6ff 0%,#dbeafe 40%,#bfdbfe 100%)",
+      background: "linear-gradient(135deg,#a3c9b1 0%,#a3c9b1 40%,#a3c9b1 100%)",
       fontFamily: "'Nunito','Segoe UI',sans-serif",
     }}>
 
@@ -504,18 +551,16 @@ export default function OrgHome() {
         display: "flex", alignItems: "center", justifyContent: "space-between",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{
-            width: 34, height: 34, borderRadius: 10,
-            background: "linear-gradient(135deg,#2563eb,#1d4ed8)",
-            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18,
-          }}>🤝</div>
-          <span style={{ fontSize: 20, fontWeight: 900, color: "#1d4ed8", letterSpacing: -0.5 }}>All4All</span>
+          <div className="home-nav__logo-icon">
+            <img src={logo} alt="All4All Logo" className="home-nav__logo-img" />
+          </div>
+          <span style={{ fontSize: 20, fontWeight: 900, color: "#15803d", letterSpacing: -0.5 }}>All4All</span>
         </div>
         <button
           onClick={() => navigate("/profile")}
           title="View profile"
           style={{
-            background: "none", border: "2px solid #2563eb",
+            background: "none", border: "2px solid #15803d",
             borderRadius: "50%", padding: 2, cursor: "pointer",
             display: "flex", alignItems: "center", justifyContent: "center",
           }}
@@ -539,7 +584,7 @@ export default function OrgHome() {
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
             <Avatar src={org?.logo_url} name={org?.name || user?.username} size={52} />
             <div>
-              <p style={{ fontSize: 13, color: "#64748b", fontWeight: 500 }}>Organization Dashboard 🏢</p>
+              <p style={{ fontSize: 13, color: "#64748b", fontWeight: 500 }}>Organization Dashboard</p>
               <h2 style={{ fontSize: 22, fontWeight: 900, color: "#1e293b", lineHeight: 1.2 }}>
                 {org?.name || user?.username}
               </h2>
@@ -563,7 +608,7 @@ export default function OrgHome() {
                 padding: "8px 18px", borderRadius: 9, border: "none", cursor: "pointer",
                 fontFamily: "inherit", fontSize: 13, fontWeight: 700,
                 background: tab === key ? "#fff" : "transparent",
-                color: tab === key ? "#2563eb" : "#64748b",
+                color: tab === key ? "#64748b" : "#64748b",
                 boxShadow: tab === key ? "0 1px 4px rgba(0,0,0,0.08)" : "none",
                 transition: "all 0.18s",
               }}>{label}</button>
@@ -571,7 +616,7 @@ export default function OrgHome() {
           </div>
           <button onClick={() => { setEditingEvent(null); setShowModal(true); }} style={{
             padding: "10px 20px", borderRadius: 10, border: "none",
-            background: "linear-gradient(135deg,#2563eb,#1d4ed8)", color: "#fff",
+            background: "linear-gradient(135deg,#15803d,#15803d)", color: "#fff",
             fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
             boxShadow: "0 2px 8px rgba(37,99,235,0.30)",
             display: "flex", alignItems: "center", gap: 6,
@@ -621,26 +666,40 @@ export default function OrgHome() {
                       border: "1.5px solid #e2e8f0", fontSize: 14, fontFamily: "inherit",
                       fontWeight: 500, outline: "none", background: "#fff", color: "#1e293b",
                     }}
-                    onFocus={e => { e.currentTarget.style.borderColor = "#2563eb"; }}
+                    onFocus={e => { e.currentTarget.style.borderColor = "#15803d"; }}
                     onBlur={e => { e.currentTarget.style.borderColor = "#e2e8f0"; }}
                   />
                 </div>
                 <button onClick={() => setShowFilters(p => !p)} style={{
                   padding: "11px 18px", borderRadius: 12, cursor: "pointer",
-                  border: showFilters ? "1.5px solid #2563eb" : "1.5px solid #e2e8f0",
+                  border: showFilters ? "1.5px solid #15803d" : "1.5px solid #e2e8f0",
                   background: showFilters ? "#eff6ff" : "#fff",
-                  color: showFilters ? "#2563eb" : "#475569",
+                  color: showFilters ? "#15803d" : "#475569",
                   fontFamily: "inherit", fontWeight: 600, fontSize: 13.5,
                   display: "flex", alignItems: "center", gap: 6,
                 }}>
-                  ⚙️ Filters {showFilters ? "▲" : "▼"}
+                  Filters {showFilters ? "▲" : "▼"}
                 </button>
               </div>
 
-              <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4, scrollbarWidth: "none" }}>
-                {CATEGORIES.map(c => (
-                  <CategoryPill key={c} label={c} active={c === activeCategory} onClick={() => setCategory(c)} />
-                ))}
+              <div style={{
+                  display: "flex",
+                  flexWrap: "wrap",     // ✅ allows multiple rows
+                  gap: 8,
+                  paddingBottom: 4
+                }}>
+                 {categories.map(c => {
+                  const name = c.name || c;
+
+                  return (
+                    <CategoryPill
+                      key={c.id || name}
+                      label={name}
+                      active={activeCategories.includes(name)}
+                      onClick={() => toggleCategory(name)}
+                    />
+                  );
+                })}
               </div>
 
               {showFilters && (
@@ -664,7 +723,7 @@ export default function OrgHome() {
                     <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ padding: "7px 12px", borderRadius: 8, border: "1.5px solid #e2e8f0", fontSize: 13, fontFamily: "inherit", color: "#334155", background: "#fff", outline: "none" }} />
                   </div>
                   <div style={{ display: "flex", alignItems: "flex-end" }}>
-                    <button onClick={() => { setDistance("Any Distance"); setDateFrom(""); setDateTo(""); setCategory("All"); }} style={{ background: "none", border: "1.5px solid #fca5a5", borderRadius: 8, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, color: "#ef4444", cursor: "pointer", fontFamily: "inherit" }}>
+                    <button onClick={() => { setDistance("Any Distance"); setDateFrom(""); setDateTo(""); setActiveCategories("All"); }} style={{ background: "none", border: "1.5px solid #fca5a5", borderRadius: 8, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, color: "#ef4444", cursor: "pointer", fontFamily: "inherit" }}>
                       Clear all
                     </button>
                   </div>
@@ -724,7 +783,7 @@ export default function OrgHome() {
       <style>{`
         ::-webkit-scrollbar { width: 5px; height: 5px; }
         ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #bfdbfe; border-radius: 99px; }
+        ::-webkit-scrollbar-thumb { background: #a3c9b1; border-radius: 99px; }
       `}</style>
     </div>
   );

@@ -7,7 +7,7 @@
 .prof-page {
   width: 100%;
   min-height: 100vh;
-  background: #f8fafc;
+  background: #f0fdf4;
   font-family: 'Nunito', 'Segoe UI', sans-serif;
 }
 
@@ -137,7 +137,7 @@
 }
 
 .prof-badge--volunteer { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
-.prof-badge--org       { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
+.prof-badge--org       { background: #eff6ff; color: #15803d; border: 1px solid #bfdbfe; }
 
 .prof-header-actions { display: flex; align-items: center; flex-shrink: 0; }
 
@@ -179,7 +179,7 @@
 /* ── Save toast ──────────────────────────────────────── */
 
 .prof-toast {
-  background: #f0fdf4;
+  background: #fff;
   border: 1px solid #bbf7d0;
   border-radius: 8px;
   padding: 11px 16px;
@@ -307,4 +307,31 @@
   .prof-header-card { gap: 14px; }
   .prof-row         { flex-direction: column; gap: 0; }
   .prof-danger-row  { flex-direction: column; align-items: flex-start; gap: 12px; }
+}
+
+/* Logo button — left side of nav */
+.prof-nav__logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  font-size: 20px;
+  font-weight: 900;
+  color: #15803d;        /* or #fff if your nav bg is dark */
+  letter-spacing: -0.5px;
+  font-family: inherit;
+}
+
+/* Back to Home — right side, white, larger */
+.prof-nav__back {
+  background: none;
+  border: none;
+  /*cursor: pointer;*/
+  color: #15803d;
+  font-size: 15px;
+  font-weight: 700;
+  font-family: inherit;
 }

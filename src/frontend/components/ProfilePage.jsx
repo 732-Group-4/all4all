@@ -4,13 +4,14 @@ import AvatarIcon from "./profile/AvatarIcon";
 import Field from "./shared/Field";
 import TextInput from "./shared/TextInput";
 import ColorWheelPicker from "./ColorWheelPicker";
+import logo from "../../assets/all4allLogo.png";
 import {
   validateUsernameFormat,
   validatePhone, formatPhone,
   validateZip, validatePassword,
 } from "../../backend/login_utils/validators";
 import { getPasswordStrength } from "../../backend/login_utils/passwordStrength";
-import "../styles/profile.css"; 
+import "../styles/profile.css";
 
 export default function ProfilePage() {
   const navigate = useNavigate();
@@ -55,10 +56,10 @@ export default function ProfilePage() {
       })
       .catch(err => console.error("Error fetching name:", err));
 
-      fetch(`/api/phone?user_id=${user.id}`)
-    .then(res => res.json())
-    .then(data => setForm(f => ({ ...f, phone: data.phone })))
-    .catch(err => console.error("Error fetching phone:", err));
+    fetch(`/api/phone?user_id=${user.id}`)
+      .then(res => res.json())
+      .then(data => setForm(f => ({ ...f, phone: data.phone })))
+      .catch(err => console.error("Error fetching phone:", err));
   }, []);
 
   const str = getPasswordStrength(newPass);
@@ -81,7 +82,6 @@ export default function ProfilePage() {
     const url = URL.createObjectURL(file);
 
     img.onload = () => {
-      // Resize down to max 100x100
       const MAX = 100;
       const scale = Math.min(MAX / img.width, MAX / img.height, 1);
       const canvas = document.createElement("canvas");
@@ -91,7 +91,6 @@ export default function ProfilePage() {
       const ctx = canvas.getContext("2d");
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-      // Compress to JPEG at 60% quality
       const compressed = canvas.toDataURL("image/jpeg", 0.6);
       URL.revokeObjectURL(url);
       set("avatar", compressed);
@@ -149,12 +148,12 @@ export default function ProfilePage() {
     }
 
     localStorage.setItem("user", JSON.stringify(updated));
-    setUser(updated); // ✅ this triggers the re-render
+    setUser(updated);
 
     setNewPass("");
     setConfirmPass("");
     setErrors({});
-    setEditing(false); // ✅ this hides Save/Cancel and shows Edit Profile
+    setEditing(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
   }
@@ -167,36 +166,28 @@ export default function ProfilePage() {
     setEditing(false);
   }
 
-  //const displayName = isVolunteer
-  //  ? `${user.full_name}`
-  //  : user.bizName;
-
-  //const [displayName, setDisplayName] = useState("");
-
-  /*useEffect(() => {
-    const user = JSON.parse(localStorage.getItem("user") || "null");
-    if (!user?.id) return;
-
-    fetch(`/api/full_name?user_id=${user.id}`)
-      .then(res => res.json())
-      .then(data => setDisplayName(data.name))
-      .catch(err => console.error("Error fetching name:", err));
-  }, []);*/
-
   return (
     <div className="prof-page">
 
       {/* ── Nav bar ── */}
       <nav className="prof-nav">
-        <button className="prof-nav__logo" onClick={() => navigate("/home")}>
-          All4All
+
+        {/* Logo + wordmark — top left */}
+        <button
+          className="prof-nav__logo"
+          onClick={() => navigate(isVolunteer ? "/home" : "/org-home")}
+        >
+          <img src={logo} alt="All4All logo" style={{ height: 32, width: "auto" }} />
+          <span>All4All</span>
         </button>
-        <button 
-            className="prof-nav__back" 
-            onClick={() => navigate(isVolunteer ? "/home" : "/org-home")}
-          >
-            Back to Home
-          </button>
+
+        {/* Back to Home — top right, white, larger */}
+        <button
+          className="prof-nav__back"
+          onClick={() => navigate(isVolunteer ? "/home" : "/org-home")}
+        >
+          ← Back to Home
+        </button>
       </nav>
 
       <div className="prof-content">
@@ -236,7 +227,7 @@ export default function ProfilePage() {
             </span>
           </div>
 
-          {/* Edit / Save / Cancel buttons */}
+          {/* Edit / Save / Cancel — inside the header card, far right */}
           <div className="prof-header-actions">
             {!editing ? (
               <button className="prof-btn" onClick={() => setEditing(true)}>
@@ -503,11 +494,14 @@ export default function ProfilePage() {
               <div className="prof-danger-label">Log Out</div>
               <div className="prof-danger-desc">Sign out of your All4All account on this device.</div>
             </div>
-            <button className="prof-btn prof-btn--danger" onClick={() => {
-                                      localStorage.removeItem("token");
-                                      localStorage.removeItem("user");
-                                      navigate("/");
-                                    }}>
+            <button
+              className="prof-btn prof-btn--danger"
+              onClick={() => {
+                localStorage.removeItem("token");
+                localStorage.removeItem("user");
+                navigate("/");
+              }}
+            >
               Log Out
             </button>
           </div>
