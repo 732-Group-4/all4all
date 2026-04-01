@@ -36,48 +36,6 @@ function calcHours(start, end) {
 }
 
 // ─── Mock data ────────────────────────────────────────────────────────────────
-const MOCK_EVENTS = [
-  {
-    id: 1, name: "River Cleanup Drive", status: "PUBLISHED",
-    description: "Join us for a morning cleaning up litter along the Genesee River trail. Gloves and bags provided.",
-    organization_name: "Clean Earth Rochester", category: "Environment",
-    roles: ["Litter Collector", "Team Leader", "Logistics Support"],
-    start_time: "2026-04-12T09:00:00", end_time: "2026-04-12T12:00:00",
-    address: "500 Genesee Park Blvd", city: "Rochester", state: "NY", zip_code: "14619", distance_miles: 1.4,
-  },
-  {
-    id: 2, name: "Community Food Pantry", status: "PUBLISHED",
-    description: "Help sort and distribute food donations at our weekly food pantry for families in need.",
-    organization_name: "Feed ROC", category: "Food & Hunger",
-    roles: ["Food Sorter", "Distribution Assistant", "Greeter"],
-    start_time: "2026-04-15T14:00:00", end_time: "2026-04-15T17:00:00",
-    address: "274 N Goodman St", city: "Rochester", state: "NY", zip_code: "14607", distance_miles: 2.1,
-  },
-  {
-    id: 3, name: "Youth Coding Workshop", status: "PUBLISHED",
-    description: "Mentor middle-school students learning Scratch and Python basics in an after-school session.",
-    organization_name: "Tech Kids ROC", category: "Education",
-    roles: ["Coding Mentor", "Floater Assistant"],
-    start_time: "2026-04-18T16:00:00", end_time: "2026-04-18T18:30:00",
-    address: "39 Main St E", city: "Rochester", state: "NY", zip_code: "14604", distance_miles: 3.7,
-  },
-  {
-    id: 4, name: "Senior Center Game Day", status: "PUBLISHED",
-    description: "Spend the afternoon playing board games and cards with residents at the Westside Senior Center.",
-    organization_name: "Westside Senior Living", category: "Elder Care",
-    roles: ["Activity Companion", "Event Setup"],
-    start_time: "2026-04-20T13:00:00", end_time: "2026-04-20T15:00:00",
-    address: "155 W Ave", city: "Rochester", state: "NY", zip_code: "14611", distance_miles: 0.8,
-  },
-  {
-    id: 5, name: "Park Trail Restoration", status: "PUBLISHED",
-    description: "Help plant native species and mulch hiking trails at Cobbs Hill Park.",
-    organization_name: "Green Spaces ROC", category: "Environment",
-    roles: ["Planting Crew", "Trail Maintenance"],
-    start_time: "2026-04-26T08:30:00", end_time: "2026-04-26T12:00:00",
-    address: "Cobbs Hill Park", city: "Rochester", state: "NY", zip_code: "14610", distance_miles: 4.2,
-  },
-];
 
 const CATEGORIES = ["All", "Environment", "Food & Hunger", "Education", "Elder Care", "Health", "Animals"];
 const DISTANCES  = ["Any Distance", "< 1 mi", "< 2 mi", "< 5 mi", "< 10 mi"];
@@ -210,6 +168,12 @@ export default function VolunteerHome() {
       return next.length ? next : ["All"];             // fallback to All if empty
     });
   }
+
+  useEffect(() => {
+    API.getPublishedEvents()
+      .then(setEvents)
+      .catch(console.error);
+  }, []);
 
   useEffect(() => {
     const user = JSON.parse(localStorage.getItem("user") || "null");

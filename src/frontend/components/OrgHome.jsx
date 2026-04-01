@@ -20,6 +20,19 @@ function calcHours(start, end) {
   return diff > 0 ? diff.toFixed(1) : null;
 }
 
+const API = {
+  getVolunteer: async (userId) => {
+    const res = await fetch(`/api/volunteers/${userId}`);
+    if (!res.ok) throw new Error("Failed to fetch volunteer");
+    return res.json();
+  },
+  getPublishedEvents: async () => {
+    const res = await fetch("/api/events");
+    if (!res.ok) throw new Error("Failed to fetch events");
+    return res.json();
+  },
+};
+
 
 // ─── Mock data ────────────────────────────────────────────────────────────────
 /*const MOCK_EVENTS = [
@@ -476,6 +489,13 @@ export default function OrgHome() {
       })
       .catch(() => setCategoryErr("Could not load categories."));
   }, []);
+
+  useEffect(() => {
+    API.getPublishedEvents()
+      .then(setAllEvents)  // ✅
+      .catch(console.error);
+  }, []);
+
   useEffect(() => {
     if (!user) { navigate("/"); return; }
 
