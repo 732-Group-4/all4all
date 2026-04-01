@@ -81,7 +81,7 @@ export default function SignIn({ onSwitch }) {
         />
       </Field>
 
-      {error && <p className="a4a-err">{error.message}</p>}
+      {error && <p className="a4a-err">{error}</p>}
 
       <button type="button" className="a4a-btn" disabled={loading} onClick={handleSubmit}>
         {loading ? "Signing in…" : "Sign In"}

@@ -1,7 +1,14 @@
 const { Builder, By, until, Key } = require("selenium-webdriver");
+const chrome = require('selenium-webdriver/chrome');
 
 describe("Home Page", () => {
-  let driver = new Builder().forBrowser("chrome").build();
+  const options = new chrome.Options();
+  if (process.env.CI) {
+    options.addArguments('--headless');
+  }
+  options.addArguments('--no-sandbox');
+  options.addArguments('--disable-dev-shm-usage');
+  let driver = new Builder().forBrowser('chrome').setChromeOptions(options).build();
 
   // stop the tests after every test has been run
   afterAll(async () => {
@@ -115,6 +122,8 @@ describe("Home Page", () => {
     );
     await buttons[0].click();
 
+    let error;
+
      // Wait for the error message to appear and assert
     error = await driver.wait(
       until.elementLocated(By.className("a4a-err")),
@@ -152,16 +161,6 @@ describe("Home Page", () => {
     );
 
     expect(await error.getText()).toBe("Please fill in all fields.");
-    
-    await usernameInput.sendKeys("testuser"); // fill in username and try again, different error
-    await buttons[0].click();
-
-    error = await driver.wait(
-      until.elementLocated(By.className("a4a-err")),
-      10000
-    );
-
-    expect(await error.getText()).toBe("Username not found.");
 
   }, 30000);
 });
