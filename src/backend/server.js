@@ -2,6 +2,7 @@ import express from "express";
 import bcrypt from "bcrypt";
 import { pool } from "./db.js";
 import jwt from "jsonwebtoken";
+import multer from "multer";
 
 // For using env variables (i.e. JWT_SECRET for tokens)
 import dotenv from "dotenv";
@@ -629,5 +630,21 @@ app.get("/api/volunteer_badges", async (req, res) => {
     res.status(500).send("Database error");
   }
 });
+
+// set upload directory and filename callbacks for multer
+const storage = multer.diskStorage({
+  destination: function(req, file, cb) {
+    cb(null, `/uploads/${req.body.user_id}`)
+  },
+  filename: function(req, file, cb) {
+    cb(null, file.fieldname)
+  }
+})
+
+const upload = multer({ storage: storage })
+
+app.post("api/upload", upload.single("file"), async (req, res) => {
+  res.send('File uploaded successfully');
+})
 
 export default app;
