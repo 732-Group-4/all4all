@@ -12,6 +12,16 @@ describe("Home Page", () => {
 
   // stop the tests after every test has been run
   afterAll(async () => {
+    const coverage = await driver.executeScript('return window.__coverage__');
+    const fs = require('fs');
+    const path = require('path');
+
+    // Each test run writes its own coverage file; nyc will merge them
+    fs.mkdirSync('./.nyc_output', { recursive: true });
+    fs.writeFileSync(
+      `./.nyc_output/coverage-${Date.now()}.json`,
+      JSON.stringify(coverage)
+    );
     await driver.quit();
   });
 

@@ -10,7 +10,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest",
-    "test:e2e": "start-server-and-test dev http://localhost:5173 'jest tests/ --watchAll=false'"
+    "test:e2e": "start-server-and-test dev http://localhost:5173 'jest tests/ --watchAll=false'",
+    "test:e2e:coverage": "npm run test:e2e && npx nyc report --reporter=html --report-dir=./coverage/selenium"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
@@ -29,6 +30,7 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
+    "@vitest/coverage-v8": "^4.1.2",
     "concurrently": "^9.2.1",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
@@ -41,6 +43,7 @@
     "start-server-and-test": "^2.1.5",
     "supertest": "^7.2.2",
     "vite": "^7.3.1",
+    "vite-plugin-istanbul": "^8.0.0",
     "vitest": "^4.1.0"
   }
 }
