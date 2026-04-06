@@ -1,3 +1,4 @@
+/* eslint-disable no-undef */
 const { Builder, By, until, Key } = require("selenium-webdriver");
 const chrome = require('selenium-webdriver/chrome');
 

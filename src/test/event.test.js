@@ -49,6 +49,45 @@ describe("Event creation", () => {
     expect(eventRes.body).toHaveProperty("id");
   });
 
+  it("should fail to create an event with error code 500", async () => {
+    const unique = randomUUID();
+
+    const orgRes = await request(app)
+      .post("/api/registerOrg")
+      .send({
+        name: `org${unique}`,
+        email: `org${unique}@test.com`,
+        phone: "555-1111",
+        description: "Test organization",
+        password: "pass123",
+        category_id: 1,
+        zip_code: "14623"
+      });
+
+    console.log("Org:", orgRes.statusCode, orgRes.body);
+
+    expect(orgRes.statusCode).toBe(200);
+    expect(orgRes.body).toHaveProperty("id");
+
+    const eventRes = await request(app)
+      .post("/api/events")
+      .send({
+        organization_id: orgRes.body.id,
+        name: "Community Cleanup",
+        description: "Cleaning local park",
+        start_time: "2026-04-02T10:00:00Z",
+        end_time: "2026-04-01T12:00:00Z",
+        address: "100 Main St",
+        city: "Rochester",
+        state: "NY",
+        zip_code: "14623"
+      });
+
+    console.log("Event:", eventRes.statusCode, eventRes.body);
+
+    expect(eventRes.statusCode).toBe(500);
+  });
+
   it("should return 400 when required fields are missing", async () => {
   const res = await request(app)
     .post("/api/events")

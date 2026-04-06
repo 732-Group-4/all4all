@@ -481,8 +481,8 @@ app.get("/api/events/:id/count", async (req, res) => {
 app.get("/api/full_name", async (req, res) => {
   try {
     const { user_id } = req.body;
-    const org = false;
-    const result = await pool.query(
+    let org = false;
+    let result = await pool.query(
       "SELECT full_name FROM volunteers WHERE user_id = $1",
       [user_id]
     );
@@ -499,7 +499,7 @@ app.get("/api/full_name", async (req, res) => {
     }
 
     // if we get here, we're good
-    const name = null;
+    let name = null;
     if (org) {
       name = result.rows[0].name;
     } else {
