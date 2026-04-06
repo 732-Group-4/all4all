@@ -2,6 +2,8 @@ import request from "supertest";
 import { describe, it, expect } from "vitest";
 import app from "../backend/server";
 import { randomUUID } from "crypto";
+import { vi, afterEach } from "vitest";
+import { pool } from "../backend/db.js";
 
 /**
  * Tests endpoint for email validation
@@ -58,6 +60,159 @@ describe("Volunteer registration", () => {
     //Should return a success code and the record id that was created
     expect(res.statusCode).toBe(200);
     expect(res.body).toHaveProperty("id");
+  });
+
+  it("should fail to register a volunteer", async () => {
+    const unique = randomUUID();
+    const uniqueUsername = `test${unique}`;
+
+    //Send all required registration arguments in a post request and await response
+    const res = await request(app)
+      .post("/api/registerVolunteer")
+      .send({
+        username: uniqueUsername,
+        password: "pass123",
+        firstName: "Jane",
+        lastName: "Doe",
+      });
+
+    //Log status and response contents for debugging
+    console.log(res.statusCode, res.body);
+
+    //Should return a success code and the record id that was created
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("should block registering a duplicate volunteer", async () => {
+    const unique = randomUUID();
+    const uniqueEmail = `test${unique}@test.com`;
+    const uniqueUsername = `test${unique}`;
+
+    //Send all required registration arguments in a post request and await response
+    let res = await request(app)
+      .post("/api/registerVolunteer")
+      .send({
+        username: uniqueUsername,
+        email: uniqueEmail,
+        password: "pass123",
+        firstName: "Jane",
+        lastName: "Doe",
+        phone: "555-1234"
+      });
+
+    //Log status and response contents for debugging
+    console.log(res.statusCode, res.body);
+
+    //Should return a success code and the record id that was created
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toHaveProperty("id");
+
+        //Send all required registration arguments in a post request and await response
+    res = await request(app)
+      .post("/api/registerVolunteer")
+      .send({
+        username: uniqueUsername,
+        email: uniqueEmail,
+        password: "pass123",
+        firstName: "Jane",
+        lastName: "Doe",
+        phone: "555-1234"
+      });
+
+    //Log status and response contents for debugging
+    console.log(res.statusCode, res.body);
+
+    //Should return a success code and the record id that was created
+    expect(res.statusCode).toBe(409);
+  });
+});
+
+describe("Organization registration", () => {
+  it("should register an organization user", async () => {
+    const unique = randomUUID();
+    const uniqueEmail = `test${unique}@test.com`;
+    const uniqueUsername = `test${unique}`;
+
+    //Send all required registration arguments in a post request and await response
+    const res = await request(app)
+      .post("/api/registerOrg")
+      .send({
+        name: uniqueUsername,
+        email: uniqueEmail,
+        password: "pass123",
+        category_id: 1,
+        zip_code: 14623,
+        description: "description",
+        phone: "555-1234"
+      });
+
+    //Log status and response contents for debugging
+    console.log(res.statusCode, res.body);
+
+    //Should return a success code and the record id that was created
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toHaveProperty("id");
+  });
+
+  it("should create a database error", async () => {
+    const unique = randomUUID();
+    const uniqueEmail = `test${unique}@test.com`;
+    const uniqueUsername = `test${unique}`;
+
+    //Send all required registration arguments in a post request and await response
+    const res = await request(app)
+      .post("/api/registerOrg")
+      .send({
+        username: uniqueUsername,
+        email: uniqueEmail,
+        password: "pass123",
+        category_id: 1,
+        zip_code: 14623,
+        description: "description",
+        phone: "555-1234"
+      });
+
+    //Log status and response contents for debugging
+    console.log(res.statusCode, res.body);
+
+    //Should return a success code and the record id that was created
+    expect(res.statusCode).toBe(500);
+  });
+
+  it("should fail to register user with used email", async () => {
+    const unique = randomUUID();
+    const uniqueEmail = `test${unique}@test.com`;
+    const uniqueUsername = `test${unique}`;
+
+    //Send all required registration arguments in a post request and await response
+    let res = await request(app)
+      .post("/api/registerOrg")
+      .send({
+        name: uniqueUsername,
+        email: uniqueEmail,
+        password: "pass123",
+        category_id: 1,
+        zip_code: 14623,
+        description: "description",
+        phone: "555-1234"
+      });
+
+    //Log status and response contents for debugging
+    console.log(res.statusCode, res.body);
+
+    res = await request(app)
+      .post("/api/registerOrg")
+      .send({
+        name: uniqueUsername,
+        email: uniqueEmail,
+        password: "pass123",
+        category_id: 1,
+        zip_code: 14623,
+        description: "description",
+        phone: "555-1234"
+      });
+
+    expect(res.statusCode).toBe(409);
   });
 });
 
@@ -627,7 +782,6 @@ describe("Login", () => {
   });
 });
 
-
 /**
  * Tests endpoint for orgCategories
  * /api/orgCategories
@@ -652,4 +806,30 @@ describe("orgCategories", () => {
     expect(res.body).toHaveProperty("length");
     expect(res.body.length).toBe(12);
   });
+});
+
+/**
+ * Database error mocking tests
+ */
+describe("Database error mocking - Register endpoints", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("should return 500 on GET /api/checkEmail database error", async () => {
+    const _querySpy = vi.spyOn(pool, 'query').mockRejectedValue(new Error("Database error"));
+
+    const res = await request(app).get("/api/checkEmail?email=test@test.com");
+
+    expect(res.statusCode).toBe(500);
+  });
+
+  it("should return 500 on GET /api/orgCategories database error", async () => {
+    const _querySpy = vi.spyOn(pool, 'query').mockRejectedValue(new Error("Database error"));
+
+    const res = await request(app).get("/api/orgCategories");
+
+    expect(res.statusCode).toBe(500);
+  });
+
 });

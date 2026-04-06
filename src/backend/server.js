@@ -480,26 +480,26 @@ app.get("/api/events/:id/count", async (req, res) => {
 
 app.get("/api/full_name", async (req, res) => {
   try {
-    const { user_id } = req.body;
-    const org = false;
-    const result = await pool.query(
+    const user_id = req.query.user_id;
+    let org = false;
+    let result = await pool.query(
       "SELECT full_name FROM volunteers WHERE user_id = $1",
       [user_id]
     );
     if (result.rowCount === 0) {
       org = true
       result = await pool.query(
-        "SELECT full_name FROM organizations WHERE user_id = $1",
+        "SELECT name FROM organizations WHERE user_id = $1",
         [user_id]
       );
     }
 
     if (result.rowCount === 0) {
-      res.status(404).send("User ID not found.");
+      return res.status(404).send("User ID not found.");
     }
 
     // if we get here, we're good
-    const name = null;
+    let name = null;
     if (org) {
       name = result.rows[0].name;
     } else {
