@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+
+/**
+ * Verify that server starts up as intended on port 3001 when start is run
+ */
 describe("start.js", () => {
   beforeEach(() => {
     vi.resetModules();

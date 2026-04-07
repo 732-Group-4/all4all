@@ -729,6 +729,7 @@ describe("Database error mocking - Event endpoints", () => {
     vi.restoreAllMocks();
   });
 
+  //Mock database interaction to intentionally throw a database error and cause error code 500
   it("should return 500 on GET /api/events database error", async () => {
     const _querySpy = vi.spyOn(pool, 'query').mockRejectedValue(new Error("Database error"));
 
@@ -737,6 +738,7 @@ describe("Database error mocking - Event endpoints", () => {
     expect(res.statusCode).toBe(500);
   });
 
+  //Mock database interaction to intentionally throw a database error and cause error code 500
   it("should return 500 on GET /api/events/:id database error", async () => {
     const _querySpy = vi.spyOn(pool, 'query').mockRejectedValue(new Error("Database error"));
 
@@ -745,6 +747,7 @@ describe("Database error mocking - Event endpoints", () => {
     expect(res.statusCode).toBe(500);
   });
 
+  //Mock database interaction to intentionally throw a database error and cause error code 500
   it("should return 500 on PUT /api/events/:id database error", async () => {
     const _querySpy = vi.spyOn(pool, 'query').mockRejectedValue(new Error("Database error"));
 
