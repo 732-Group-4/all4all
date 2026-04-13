@@ -714,6 +714,11 @@ app.post("/api/createBadge", async (req, res) => {
       "INSERT INTO badges(user_id,name,description) VALUES($1,$2,$3) RETURNING id",
       [user_id, badge_name, description]
     );
+    if (badgeResult.rowCount === 0) {
+      console.log("error updating db")
+      return res.status(400).json({ error: "Error updating database" })
+    }
+
     console.log("done with insert query")
 
     await client.query("COMMIT");
