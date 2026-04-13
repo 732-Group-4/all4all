@@ -636,8 +636,8 @@ app.get("/api/volunteer_badges", async (req, res) => {
 // set upload directory and filename callbacks for multer
 const storage = multer.diskStorage({
   destination: function(req, file, cb) {
-    const rawType = Array.isArray(req.body.uploadType) ? req.body.uploadType : req.body.uploadType;
-    const rawId = Array.isArray(req.body.userId) ? req.body.userId : req.body.userId;
+    const rawType = Array.isArray(req.body.uploadType) ? req.body.uploadType[0] : req.body.uploadType;
+    const rawId = Array.isArray(req.body.userId) ? req.body.userId[0] : req.body.userId;
 
     const strType = String(rawType || '');
     const strId = String(rawId || '');
