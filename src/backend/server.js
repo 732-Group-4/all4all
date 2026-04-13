@@ -58,7 +58,7 @@ app.post("/api/registerVolunteer", async (req, res) => {
     await client.query("COMMIT");
     transactionStarted = false;
 
-    res.json({ id: volunteerResult.rows[0].id });
+    res.json({ id: volunteerResult.rows[0].id, user_id });
 
   } catch (err) {
     if (transactionStarted) {

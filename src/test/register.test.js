@@ -852,13 +852,13 @@ describe("upload_image", () => {
     const res = await request(app)
       .post("/api/upload_image")
       .field("uploadType", "user")
-      .field("userId", regRes.body.id)
+      .field("userId", regRes.body.user_id)
       .attach("file", testFilePath);
 
     expect(res.status).toBe(200);
     expect(res.text).toMatch(/uploaded/i);
 
-    const uploadPath = `./uploads/user/${regRes.body.id}`;
+    const uploadPath = `./uploads/user/${regRes.body.user_id}`;
     expect(fs.existsSync(uploadPath)).toBe(true);
 
     const files = fs.readdirSync(uploadPath);
@@ -889,7 +889,7 @@ describe("upload_image", () => {
       .send({
         badge_name: "Test Badge",
         description: "A test badge",
-        user_id: regRes.body.id
+        user_id: regRes.body.user_id
       });
 
     expect(badgeRes.status).toBe(200);
@@ -898,14 +898,14 @@ describe("upload_image", () => {
     const res = await request(app)
       .post("/api/upload_image")
       .field("uploadType", "badge")
-      .field("userId", regRes.body.id)
+      .field("userId", regRes.body.user_id)
       .field("badgeId", badgeRes.body.id)
       .attach("file", testFilePath);
 
     expect(res.status).toBe(200);
     expect(res.text).toMatch(/uploaded/i);
 
-    const uploadPath = `./uploads/badge/${regRes.body.id}`;
+    const uploadPath = `./uploads/badge/${regRes.body.user_id}`;
     expect(fs.existsSync(uploadPath)).toBe(true);
 
     const files = fs.readdirSync(uploadPath);
@@ -932,7 +932,7 @@ describe("upload_image", () => {
     const res = await request(app)
       .post("/api/upload_image")
       .field("uploadType", "invalid")
-      .field("userId", regRes.body.id)
+      .field("userId", regRes.body.user_id)
       .attach("file", testFilePath);
 
     expect(res.status).toBe(400);
@@ -981,7 +981,7 @@ describe("upload_image", () => {
     const res = await request(app)
       .post("/api/upload_image")
       .field("uploadType", "user")
-      .field("userId", regRes.body.id);
+      .field("userId", regRes.body.user_id);
 
     // could be 400 or 500 depending on how multer behaves
     expect(res.status).toBeGreaterThanOrEqual(400);

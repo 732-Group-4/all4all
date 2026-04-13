@@ -746,9 +746,10 @@ describe("createBadge", () => {
       .send({
         badge_name: "Test Badge",
         description: "A test badge",
-        user_id: regRes.body.id
+        user_id: regRes.body.user_id
       });
 
+    console.log(res.statusCode, res.body)
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty("id");
   });
