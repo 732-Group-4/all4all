@@ -1,6 +1,6 @@
 {
   "name": "@732-group-4/all4all",
-  "private": true,
+  "private": false,
   "version": "1.0.0",
   "type": "module",
   "publishConfig": {
