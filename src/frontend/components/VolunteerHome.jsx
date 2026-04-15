@@ -231,6 +231,7 @@ function EventDetailModal({
   onClose,
   onRegisterChange,
 }) {
+  const [attendee, setAttendee] = useState(false);
   const [orgData, setOrgData]             = useState(null);
   const [registered, setRegistered]       = useState(initialRegistered);
   const [selectedRoles, setSelectedRoles] = useState(new Set());
@@ -242,22 +243,27 @@ function EventDetailModal({
   const brandColor = orgData?.brand_color || "#2e7d45";
   const brandLight = orgData?.brand_color ? `${orgData.brand_color}18` : "#e8f5ec";
   const [registrantCount, setRegistrantCount] = useState(0);
+  const [eventBadges, setEventBadges] = useState([]);
   // Add this state + useEffect inside EventDetailModal
 
   useEffect(() => {
-    if (!event?.id) return;
-    fetch(`/api/events/${event.id}/registrations/count`)
-      .then(r => r.json())
-      .then(data => setRegistrantCount(data.total))
-      .catch(console.error);
-    fetch(`/api/events/${event.id}/roles`)
-      .then(r => r.json())
-      .then(data => setRoles(data.map(r => ({
-        ...r,
-        spots_available: r.spots - parseInt(r.filled),
-      }))))
-      .catch(console.error);
-  }, [event?.id]);
+  if (!event?.id) return;
+  fetch(`/api/events/${event.id}/registrations/count`)
+    .then(r => r.json())
+    .then(data => setRegistrantCount(data.total))
+    .catch(console.error);
+  fetch(`/api/events/${event.id}/roles`)
+    .then(r => r.json())
+    .then(data => setRoles(data.map(r => ({
+      ...r,
+      spots_available: r.spots - parseInt(r.filled),
+    }))))
+    .catch(console.error);
+  fetch(`/api/events/${event.id}/badges`)   // ✅ add this
+    .then(r => r.json())
+    .then(setEventBadges)
+    .catch(console.error);
+}, [event?.id]);
 
   useEffect(() => {
     if (!event?.organization_id) return;
@@ -317,6 +323,13 @@ function EventDetailModal({
 
   async function handleRegister() {
     if (!volunteerId) return alert("Please log in to register.");
+
+    // Require a role to be selected if roles exist
+    if (!registered && roles.length > 0 && selectedRoles.size === 0) {
+      alert("Please select a role before registering.");
+      return;
+    }
+
     setLoading(true);
     try {
       if (!registered) {
@@ -343,28 +356,29 @@ function EventDetailModal({
 
         setRegistered(true);
         onRegisterChange?.(event.id, true);
-      } else {
-        // Unregister from event
-        const res = await fetch(`/api/events/${event.id}/register`, {
+        } else {
+      // Unregister from event
+      const res = await fetch(`/api/events/${event.id}/register`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ volunteer_id: volunteerId }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+
+      // Fetch ALL roles the volunteer is registered for, then unregister all
+      const allRoles = await fetch(`/api/events/${event.id}/roles`).then(r => r.json());
+      for (const role of allRoles) {
+        await fetch(`/api/roles/${role.id}/register`, {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ volunteer_id: volunteerId }),
-        });
-        if (!res.ok) throw new Error(await res.text());
-
-        // Unregister from all roles
-        for (const roleId of selectedRoles) {
-          await fetch(`/api/roles/${roleId}/register`, {
-            method: "DELETE",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ volunteer_id: volunteerId }),
-          });
-        }
-
-        setSelectedRoles(new Set());
-        setRegistered(false);
-        onRegisterChange?.(event.id, false);
+        }).catch(() => {}); // silently ignore if not registered for this role
       }
+
+      setSelectedRoles(new Set());
+      setRegistered(false);
+      onRegisterChange?.(event.id, false);
+    }
     } catch (err) {
       console.error(err);
       alert("Something went wrong. Please try again.");
@@ -376,7 +390,7 @@ function EventDetailModal({
 
   const totalSpots = roles.reduce((sum, r) => sum + (r.spots_available ?? 0), 0);
   //const totalSpots = roles.reduce((sum, r) => sum + (r.spots_available ?? 0), 0);
-  const badges = event.badges ?? [];
+  const badges = eventBadges;
 
   return (
     <div
@@ -662,8 +676,7 @@ function EventDetailModal({
                           borderRadius: 10,
                           border: `1.5px solid ${isFull ? "#eee" : checked ? brandColor : "#eee"}`,
                           cursor: isFull ? "not-allowed" : "pointer",
-                          userSelect: "none",
-                          opacity: isFull ? 0.5 : 1,
+                          userSelect: "none", opacity: isFull ? 0.5 : 1,
                         }}
                       >
                         <div style={{
@@ -686,7 +699,30 @@ function EventDetailModal({
                   })}
                 </div>
               ) : (
-                <p style={{ fontSize: 13, color: "#aaa" }}>No specific roles listed.</p>
+                // No roles — show Attendee option
+                <div
+                  className="ev-role-item"
+                  onClick={() => setAttendee(p => !p)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 10,
+                    padding: "10px 14px",
+                    background: attendee ? brandLight : "#fff",
+                    borderRadius: 10,
+                    border: `1.5px solid ${attendee ? brandColor : "#eee"}`,
+                    cursor: "pointer", userSelect: "none",
+                  }}
+                >
+                  <div style={{
+                    width: 18, height: 18, borderRadius: 5, flexShrink: 0,
+                    border: `2px solid ${attendee ? brandColor : "#ccc"}`,
+                    background: attendee ? brandColor : "transparent",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 11, color: "#fff",
+                  }}>
+                    {attendee ? "✓" : ""}
+                  </div>
+                  <span style={{ fontSize: 14, fontWeight: 500, color: "#222" }}>Attendee</span>
+                </div>
               )}
             </div>
 

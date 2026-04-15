@@ -82,6 +82,7 @@ function CategoryPill({ label, active, onClick }) {
 }
 
 function EventCard({ event, isOwnEvent, onEdit, onDelete }) {
+  const [registrantSearch, setRegistrantSearch] = useState("");
   const [expanded, setExpanded] = useState(false);
   const hours = calcHours(event.start_time, event.end_time);
   const isDraft = event.status === "DRAFT";
@@ -217,50 +218,176 @@ function EventCard({ event, isOwnEvent, onEdit, onDelete }) {
           </div>
         )}
       </div>
-    <button
-    onClick={async () => {
-      if (!showRegistrants && registrants.length === 0) {
-        const data = await fetch(`/api/events/${event.id}/registrations`).then(r => r.json());
-        setRegistrants(data);
-      }
-      setShowRegistrants(p => !p);
-    }}
-    style={{
-      background: "none", border: "1.5px solid #e2e8f0", borderRadius: 8,
-      padding: "7px 14px", fontSize: 12.5, fontWeight: 600, color: "#475569",
-      cursor: "pointer", fontFamily: "inherit",
-    }}
-  >
-    👥 {showRegistrants ? "Hide" : "See"} Registrants
-  </button>
+    {isOwnEvent && !isDraft && (
+      <>
+        <button
+          onClick={async () => {
+            if (!showRegistrants && registrants.length === 0) {
+              const data = await fetch(`/api/events/${event.id}/registrations`).then(r => r.json());
+              setRegistrants(data);
+            }
+            setShowRegistrants(p => !p);
+          }}
+          style={{
+            background: "none", border: "1.5px solid #e2e8f0", borderRadius: 8,
+            padding: "7px 14px", fontSize: 12.5, fontWeight: 600, color: "#475569",
+            cursor: "pointer", fontFamily: "inherit",
+          }}
+        >
+          👥 {showRegistrants ? "Hide" : "See"} Registrants
+        </button>
 
-  {showRegistrants && (
-    <div style={{
-      background: "#f8fafc", borderRadius: 10, padding: "12px 14px",
-      border: "1px solid #e2e8f0", marginTop: 4,
-    }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b", marginBottom: 8 }}>
-        {registrants.length} volunteer{registrants.length !== 1 ? "s" : ""} registered
+        {showRegistrants && (
+          <div style={{
+            background: "#f8fafc", borderRadius: 10, padding: "12px 14px",
+            border: "1px solid #e2e8f0", marginTop: 4,
+          }}>
+            {/* Search bar */}
+            <input
+              placeholder="Search registrants…"
+              value={registrantSearch}
+              onChange={e => setRegistrantSearch(e.target.value)}
+              style={{
+                width: "100%", padding: "7px 12px", borderRadius: 8,
+                border: "1.5px solid #e2e8f0", fontSize: 13,
+                fontFamily: "inherit", marginBottom: 10, boxSizing: "border-box",
+                outline: "none",
+              }}
+            />
+
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b", marginBottom: 8 }}>
+              {registrants.length} volunteer{registrants.length !== 1 ? "s" : ""} registered
+            </div>
+
+            {registrants.length === 0 ? (
+              <p style={{ fontSize: 13, color: "#94a3b8" }}>No one registered yet.</p>
+            ) : registrants
+  .filter(r => r.full_name?.toLowerCase().includes(registrantSearch.toLowerCase()) ||
+               r.email?.toLowerCase().includes(registrantSearch.toLowerCase()))
+  .map((r, i) => (
+  <div key={i} style={{
+    background: "#fff", borderRadius: 10, padding: "10px 12px",
+    border: "1px solid #e2e8f0", marginBottom: 8,
+  }}>
+    {/* Name + status pills */}
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "#1e293b" }}>{r.full_name}</div>
+        <div style={{ fontSize: 11.5, color: "#64748b" }}>{r.email}</div>
       </div>
-      {registrants.length === 0 ? (
-        <p style={{ fontSize: 13, color: "#94a3b8" }}>No one registered yet.</p>
-      ) : registrants.map((r, i) => (
-        <div key={i} style={{
-          display: "flex", justifyContent: "space-between", alignItems: "center",
-          padding: "6px 0", borderBottom: i < registrants.length - 1 ? "1px solid #e2e8f0" : "none",
-        }}>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: "#1e293b" }}>{r.full_name}</div>
-            <div style={{ fontSize: 11.5, color: "#64748b" }}>{r.email}</div>
-          </div>
-          <div style={{ fontSize: 11, color: "#94a3b8" }}>
-            {new Date(r.registered_at).toLocaleDateString()}
-          </div>
-        </div>
-      ))}
+      <div style={{ display: "flex", gap: 6 }}>
+        {r.attended ? (
+          <span style={{
+            background: "#f0fdf4", color: "#15803d", fontSize: 11, fontWeight: 700,
+            padding: "2px 9px", borderRadius: 99, border: "1px solid #bbf7d0",
+          }}>✓ Checked In</span>
+        ) : (
+          <span style={{
+            background: "#fef9c3", color: "#854d0e", fontSize: 11, fontWeight: 700,
+            padding: "2px 9px", borderRadius: 99, border: "1px solid #fde68a",
+          }}>Not Checked In</span>
+        )}
+        {r.time_out ? (
+          <span style={{
+            background: "#eff6ff", color: "#1d4ed8", fontSize: 11, fontWeight: 700,
+            padding: "2px 9px", borderRadius: 99, border: "1px solid #bfdbfe",
+          }}>✓ Checked Out</span>
+        ) : r.attended ? (
+          <span style={{
+            background: "#fdf2f8", color: "#86198f", fontSize: 11, fontWeight: 700,
+            padding: "2px 9px", borderRadius: 99, border: "1px solid #f0abfc",
+          }}>Not Checked Out</span>
+        ) : null}
+      </div>
     </div>
-  )}
 
+    {/* Time inputs */}
+    <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.5 }}>
+          Time In
+        </label>
+        <input
+          type="datetime-local"
+          defaultValue={r.time_in ? r.time_in.slice(0, 16) : ""}
+          onChange={e => r._time_in = e.target.value}
+          style={{
+            padding: "5px 8px", borderRadius: 7, border: "1.5px solid #e2e8f0",
+            fontSize: 12, fontFamily: "inherit", outline: "none",
+          }}
+        />
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.5 }}>
+          Time Out
+        </label>
+        <input
+          type="datetime-local"
+          defaultValue={r.time_out ? r.time_out.slice(0, 16) : ""}
+          onChange={e => r._time_out = e.target.value}
+          style={{
+            padding: "5px 8px", borderRadius: 7, border: "1.5px solid #e2e8f0",
+            fontSize: 12, fontFamily: "inherit", outline: "none",
+          }}
+        />
+      </div>
+
+      {/* Check In button */}
+      <button
+        onClick={async () => {
+          await fetch(`/api/events/${event.id}/checkin`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              volunteer_id: r.volunteer_id,
+              time_in: r._time_in || r.time_in || new Date().toISOString(),
+              time_out: r._time_out || r.time_out || null,
+            }),
+          });
+          const updated = await fetch(`/api/events/${event.id}/registrations`).then(res => res.json());
+          setRegistrants(updated);
+        }}
+        style={{
+          padding: "6px 14px", borderRadius: 8,
+          background: "#15803d", color: "#fff", border: "none",
+          fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+        }}
+      >
+        ✓ Check In
+      </button>
+
+      {/* Check Out button — only show if checked in */}
+      {r.attended && (
+        <button
+          onClick={async () => {
+            await fetch(`/api/events/${event.id}/checkin`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                volunteer_id: r.volunteer_id,
+                time_in: r._time_in || r.time_in || null,
+                time_out: r._time_out || r.time_out || new Date().toISOString(),
+              }),
+            });
+            const updated = await fetch(`/api/events/${event.id}/registrations`).then(res => res.json());
+            setRegistrants(updated);
+          }}
+          style={{
+            padding: "6px 14px", borderRadius: 8,
+            background: "#1d4ed8", color: "#fff", border: "none",
+            fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+          }}
+        >
+          → Check Out
+        </button>
+      )}
+    </div>
+  </div>
+))}
+          </div>
+        )}
+      </>
+    )}
     </div>
   );
 }
@@ -294,19 +421,26 @@ function EventModal({ event, orgId, onClose, onSaved }) {
     end_time:      event?.end_time?.slice(0, 16)   || "",
     address:       event?.address   || "",
     city:          event?.city      || "",
-    state:         event?.state     || "NY",
+    state:         event?.state     || "",
     zip_code:      event?.zip_code  || "",
     color:         event?.color     || "#15803d",
+    tags:           event?.tags || "",
   });
 
   const [roles, setRoles] = useState(event?.roles ?? [{ id: Date.now(), name: "", spots: "" }]);
   const [selectedTags, setSelectedTags]     = useState(new Set(event?.tags ?? []));
-  const [selectedBadges, setSelectedBadges] = useState(new Set(event?.badges?.map(b => b.id) ?? []));
+  const [selectedBadges, setSelectedBadges] = useState(new Set(
+    event?.badges?.map(b => b.id) ?? []
+  ));
   const [photos, setPhotos]   = useState(event?.photos ?? []);
   const [tab, setTab]         = useState(0);
   const [errors, setErrors]   = useState({});
   const [loading, setLoading] = useState(false);
   const [submitErr, setSubmitErr] = useState(null);
+
+  // ── Fetch available tags + badges from DB ──
+  const [availableTags, setAvailableTags] = useState([]);
+  const [availableBadges, setAvailableBadges] = useState([]);
 
   function set(key, val) {
     setForm(f => ({ ...f, [key]: val }));
@@ -362,6 +496,51 @@ function EventModal({ event, orgId, onClose, onSaved }) {
           })
           .catch(console.error);
   }, [event?.id]);
+
+  useEffect(() => {
+    // Tags come from event_categories table
+    fetch("/api/orgCategories")  // reuse this — it returns all org categories
+      .then(r => r.json())
+      .catch(() => []);
+
+    // Actually fetch event_categories for tags
+    fetch("/api/eventCategories")
+      .then(r => r.json())
+      .then(setAvailableTags)
+      .catch(console.error);
+
+    fetch("/api/badges")
+      .then(r => r.json())
+      .then(setAvailableBadges)
+      .catch(console.error);
+  }, []);
+
+  useEffect(() => {
+  if (!event?.id) return;
+
+  // Load existing roles
+  fetch(`/api/events/${event.id}/roles`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.length > 0) {
+            setRoles(data.map(r => ({ id: r.id, name: r.name, spots: r.spots })));
+          }
+        })
+        .catch(console.error);
+
+      // Load existing tags
+      fetch(`/api/events/${event.id}/tags`)
+        .then(r => r.json())
+        .then(data => setSelectedTags(new Set(data.map(t => t.name))))
+        .catch(console.error);
+
+      // Load existing badges
+      fetch(`/api/events/${event.id}/badges`)
+        .then(r => r.json())
+        .then(data => setSelectedBadges(new Set(data.map(b => b.id))))
+        .catch(console.error);
+    }, [event?.id]);
+
 
   function validate() {
     const errs = {};
@@ -421,6 +600,12 @@ function EventModal({ event, orgId, onClose, onSaved }) {
         body: JSON.stringify({ tags: tagsArray }),
       });
 
+      // Save badges
+      await fetch(`/api/events/${eventId}/badges`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ badge_ids: [...selectedBadges] }),
+      });
       onSaved({
         ...form,
         id: isEdit ? event.id : saved.id,
@@ -634,17 +819,17 @@ function EventModal({ event, orgId, onClose, onSaved }) {
               <div>
                 <label style={lbl}>Event Tags</label>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-                  {AVAILABLE_TAGS.map(tag => (
-                    <button key={tag} onClick={() => toggleTag(tag)} style={{
-                      padding: "5px 12px", borderRadius: 20, fontSize: 12, fontWeight: 600,
-                      border: `1.5px solid ${selectedTags.has(tag) ? "#15803d" : "#e2e8f0"}`,
-                      background: selectedTags.has(tag) ? "#15803d" : "#f8fafc",
-                      color: selectedTags.has(tag) ? "#fff" : "#475569",
-                      cursor: "pointer", fontFamily: "inherit", transition: "all .15s",
-                    }}>
-                      {tag}
-                    </button>
-                  ))}
+                  {availableTags.map(tag => (
+                      <button key={tag.id} onClick={() => toggleTag(tag.name)} style={{
+                        padding: "5px 12px", borderRadius: 20, fontSize: 12, fontWeight: 600,
+                        border: `1.5px solid ${selectedTags.has(tag.name) ? "#15803d" : "#e2e8f0"}`,
+                        background: selectedTags.has(tag.name) ? "#15803d" : "#f8fafc",
+                        color: selectedTags.has(tag.name) ? "#fff" : "#475569",
+                        cursor: "pointer", fontFamily: "inherit", transition: "all .15s",
+                      }}>
+                        {tag.name}
+                      </button>
+                    ))}
                 </div>
               </div>
             </div>
@@ -708,7 +893,7 @@ function EventModal({ event, orgId, onClose, onSaved }) {
                   </span>
                 </label>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  {AVAILABLE_BADGES.map(b => {
+                  {availableBadges.map(b => {
                     const on = selectedBadges.has(b.id);
                     return (
                       <button key={b.id} onClick={() => toggleBadge(b.id)} style={{
@@ -720,8 +905,11 @@ function EventModal({ event, orgId, onClose, onSaved }) {
                         fontSize: 11, color: on ? "#15803d" : "#64748b",
                         transition: "all .15s",
                       }}>
-                        <span style={{ fontSize: 26 }}>{b.icon}</span>
-                        {b.label}
+                        {b.image_url
+                          ? <img src={b.image_url} alt={b.name} style={{ width: 28, height: 28, borderRadius: "50%" }} />
+                          : <span style={{ fontSize: 26 }}>🏅</span>
+                        }
+                        {b.name}
                       </button>
                     );
                   })}
@@ -761,31 +949,24 @@ function EventModal({ event, orgId, onClose, onSaved }) {
           {tab > 0 && (
             <button onClick={() => setTab(t => t - 1)} style={{
               padding: "10px 18px", borderRadius: 10, border: "1.5px solid #e2e8f0",
-              background: "#f8fafc", color: "#475569", fontSize: 13.5, fontWeight: 700,
+              background: "#f8fafc", color: "#15803d", fontSize: 13.5, fontWeight: 700,
               cursor: "pointer", fontFamily: "inherit",
             }}>← Back</button>
           )}
           {tab < STEPS.length - 1 ? (
             <button onClick={() => setTab(t => t + 1)} style={{
-              flex: 1, padding: "10px 0", borderRadius: 10, border: "none",
-              background: "#0f172a", color: "#fff", fontSize: 13.5, fontWeight: 700,
+              flex: 1, padding: "20px 0", borderRadius: 20, border: "1.5px solid #e2e8f0",
+              background: "#f8fafc", color: "#15803d", fontSize: 13.5, fontWeight: 700,
               cursor: "pointer", fontFamily: "inherit",
             }}>Next →</button>
           ) : (
             <>
               <button onClick={() => handleSubmit("DRAFT")} disabled={loading} style={{
-                flex: 1, padding: "10px 0", borderRadius: 10, border: "1.5px solid #e2e8f0",
+                flex: 1, padding: "10px 0", borderRadius: 20, border: "1.5px solid #e2e8f0",
                 background: "#f8fafc", color: "#475569", fontSize: 13.5, fontWeight: 700,
                 cursor: "pointer", fontFamily: "inherit",
               }}>
                 {loading ? "Saving…" : "Save as Draft"}
-              </button>
-              <button onClick={() => handleSubmit("PUBLISHED")} disabled={loading} style={{
-                flex: 2, padding: "10px 0", borderRadius: 10, border: "none",
-                background: "#15803d", color: "#fff", fontSize: 13.5, fontWeight: 700,
-                cursor: "pointer", fontFamily: "inherit",
-              }}>
-                {loading ? "Publishing…" : "Publish Event"}
               </button>
             </>
           )}

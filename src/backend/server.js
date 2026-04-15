@@ -142,6 +142,41 @@ app.get("/api/checkEmail", async (req, res) => {
   }
 });
 
+app.post("/api/events/:id/checkin", async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { volunteer_id, time_in, time_out } = req.body;
+    await client.query(
+      `UPDATE event_registrations
+       SET attended = true, time_in = $1, time_out = $2
+       WHERE event_id = $3 AND volunteer_id = $4`,
+      [time_in, time_out, req.params.id, volunteer_id]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Database error");
+  } finally {
+    client.release();
+  }
+});
+
+app.get("/api/events/:id/badges", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT b.id, b.name, b.description, b.image_url
+       FROM event_badges eb
+       JOIN badges b ON b.id = eb.badge_id
+       WHERE eb.event_id = $1`,
+      [req.params.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Database error");
+  }
+});
+
 /*
   Register a new event (available for any organization account to do)
   Create all new events as DRAFT first, user must explicitly set a different status later (PUBLISH, etc.)
@@ -218,19 +253,6 @@ app.put("/api/events/:id", async (req, res) => {
   Get all events with a PUBLISHED status
   This is used for volunteer users to be able to view all events they could register for 
 */
-app.get("/api/events", async (req, res) => {
-  try {
-    const result = await pool.query(
-      "SELECT * FROM events WHERE status = 'PUBLISHED' ORDER BY start_time"
-    );
-
-    res.json(result.rows);
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Database error");
-  }
-});
 
 /*
   Get a specific event by its ID 
@@ -506,8 +528,8 @@ app.get("/api/events/:id/registrations/count", async (req, res) => {
 app.get("/api/events/:id/registrations", async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT v.full_name, u.email, u.phone_number,
-              er.registered_at
+      `SELECT v.id AS volunteer_id, v.full_name, u.email, u.phone_number,
+              er.registered_at, er.attended, er.time_in, er.time_out
        FROM event_registrations er
        JOIN volunteers v ON v.id = er.volunteer_id
        JOIN users u ON u.id = v.user_id
@@ -881,6 +903,65 @@ app.get("/api/roles/:id/volunteers", async (req, res) => {
   }
 });
 
+app.post("/api/events/:id/badges", async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { badge_ids } = req.body; // array of badge IDs
+    const event_id = req.params.id;
+
+    await client.query("DELETE FROM event_badges WHERE event_id = $1", [event_id]);
+
+    for (const badge_id of badge_ids) {
+      await client.query(
+        "INSERT INTO event_badges(event_id, badge_id) VALUES($1, $2)",
+        [event_id, badge_id]
+      );
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Database error");
+  } finally {
+    client.release();
+  }
+});
+
+app.get("/api/events/:id/tags", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT ec.id, ec.name FROM event_category_links ecl
+       JOIN event_categories ec ON ec.id = ecl.event_category_id
+       WHERE ecl.event_id = $1`,
+      [req.params.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Database error");
+  }
+});
+
+app.get("/api/badges", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM badges ORDER BY id");
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Database error");
+  }
+});
+
+app.get("/api/eventCategories", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM event_categories ORDER BY name");
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Database error");
+  }
+});
+
 /*
   KEEP AT END SO OTHER ROUTES ARE TAKEN !!
   Get all of the events linked to the specified organization id
@@ -912,7 +993,7 @@ app.get("/api/organizations/:id/events", async (req, res) => {
   }
 });
 
-app.post("/api/events", async (req, res) => {
+/*app.post("/api/events", async (req, res) => {
   const client = await pool.connect();
   try {
     const { organization_id, name, description, start_time, end_time, address, city, state, zip_code, color } = req.body;
@@ -934,7 +1015,7 @@ app.post("/api/events", async (req, res) => {
   } finally {
     client.release();
   }
-});
+});*/
 
 app.get("/api/organizations/:id", async (req, res) => {
   try {

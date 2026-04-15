@@ -102,7 +102,9 @@ CREATE TABLE event_registrations (
     volunteer_id INTEGER NOT NULL REFERENCES volunteers(id) ON DELETE CASCADE, -- which volunteer is it
     registered_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,    -- When the volunteer registered.
     attended BOOLEAN DEFAULT FALSE,    -- Allows tracking attendance and service hours.
-    UNIQUE (event_id, volunteer_id)
+    UNIQUE (event_id, volunteer_id),
+    time_in TIMESTAMP WITH TIME ZONE,
+    time_out TIMESTAMP WITH TIME ZONE
 );
 
 
