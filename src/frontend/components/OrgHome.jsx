@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import logo from "../../assets/all4allLogo.png";
 
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function initials(name = "") {
   return name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
@@ -88,18 +89,27 @@ function EventCard({ event, isOwnEvent, onEdit, onDelete }) {
   const isDraft = event.status === "DRAFT";
   const [registrants, setRegistrants] = useState([]);
   const [showRegistrants, setShowRegistrants] = useState(false);
+  const [availableBadges, setAvailableBadges] = useState([]);
+  const [selectedBadgesPerVolunteer, setSelectedBadgesPerVolunteer] = useState({});
+  const [badgesConfirmed, setBadgesConfirmed] = useState({});
+
+  useEffect(() => {
+    fetch("/api/badges").then(r => r.json()).then(setAvailableBadges).catch(console.error);
+  }, []);
 
   return (
-    <div style={{
-      background: "#fff", borderRadius: 16, padding: "20px 22px",
-      boxShadow: "0 2px 12px rgba(0,0,0,0.07)", border: `1px solid ${isOwnEvent ? "#bfdbfe" : "#e2e8f0"}`,
-      transition: "transform 0.18s, box-shadow 0.18s",
-      display: "flex", flexDirection: "column", gap: 12,
-      position: "relative",
-    }}
+    <div
+      style={{
+        background: "#fff", borderRadius: 16, padding: "20px 22px",
+        boxShadow: "0 2px 12px rgba(0,0,0,0.07)", border: `1px solid ${isOwnEvent ? "#bfdbfe" : "#e2e8f0"}`,
+        transition: "transform 0.18s, box-shadow 0.18s",
+        display: "flex", flexDirection: "column", gap: 12,
+        position: "relative",
+      }}
       onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 8px 24px rgba(0,0,0,0.10)"; }}
       onMouseLeave={e => { e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = "0 2px 12px rgba(0,0,0,0.07)"; }}
     >
+      {/* Draft / Your Event badge */}
       {isOwnEvent && (
         <div style={{
           position: "absolute", top: 12, right: 12,
@@ -113,6 +123,7 @@ function EventCard({ event, isOwnEvent, onEdit, onDelete }) {
         </div>
       )}
 
+      {/* Header: category, hours, name, org */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
         <div style={{ flex: 1 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
@@ -134,14 +145,34 @@ function EventCard({ event, isOwnEvent, onEdit, onDelete }) {
             )}
           </div>
           <h3 style={{ fontSize: 15.5, fontWeight: 800, color: "#1e293b", lineHeight: 1.3 }}>{event.name}</h3>
-          <p style={{ fontSize: 12.5, color: "#2563eb", fontWeight: 600, marginTop: 2 }}>
-            {event.organization_name || "Your Organization"}
-          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
+            {event.organization_logo ? (
+              <img
+                src={event.organization_logo}
+                alt={event.organization_name}
+                style={{ width: 18, height: 18, borderRadius: "50%", objectFit: "cover" }}
+              />
+            ) : (
+              <div style={{
+                width: 18, height: 18, borderRadius: "50%",
+                background: "linear-gradient(135deg,#15803d,#166534)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 9, fontWeight: 800, color: "#fff", flexShrink: 0,
+              }}>
+                {(event.organization_name || "?")[0]}
+              </div>
+            )}
+            <p style={{ fontSize: 12.5, color: "#2563eb", fontWeight: 600, margin: 0 }}>
+              {event.organization_name || "Your Organization"}
+            </p>
+          </div>
         </div>
       </div>
 
+      {/* Description */}
       <p style={{ fontSize: 13, color: "#475569", lineHeight: 1.6, margin: 0 }}>{event.description}</p>
-      
+
+      {/* Tags */}
       {event.tags?.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
           {event.tags.map(tag => (
@@ -155,6 +186,7 @@ function EventCard({ event, isOwnEvent, onEdit, onDelete }) {
         </div>
       )}
 
+      {/* Roles (expanded) */}
       {expanded && event.roles?.length > 0 && (
         <div>
           <p style={{ fontSize: 12, fontWeight: 700, color: "#64748b", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>
@@ -171,18 +203,22 @@ function EventCard({ event, isOwnEvent, onEdit, onDelete }) {
         </div>
       )}
 
+      {/* Date / location */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, fontSize: 12.5, color: "#64748b" }}>
         <span>📅 {formatDate(event.start_time)} · {formatTime(event.start_time)} – {formatTime(event.end_time)}</span>
         {event.city && <span>📍 {event.city}, {event.state} · {event.distance_miles} mi away</span>}
       </div>
 
+      {/* Action buttons */}
       <div style={{ display: "flex", gap: 8, marginTop: 2 }}>
         {event.roles?.length > 0 && (
-          <button onClick={() => setExpanded(p => !p)} style={{
-            background: "none", border: "1.5px solid #e2e8f0", borderRadius: 8,
-            padding: "7px 14px", fontSize: 12.5, fontWeight: 600, color: "#475569",
-            cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s",
-          }}
+          <button
+            onClick={() => setExpanded(p => !p)}
+            style={{
+              background: "none", border: "1.5px solid #e2e8f0", borderRadius: 8,
+              padding: "7px 14px", fontSize: 12.5, fontWeight: 600, color: "#475569",
+              cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s",
+            }}
             onMouseEnter={e => { e.currentTarget.style.borderColor = "#2563eb"; e.currentTarget.style.color = "#2563eb"; }}
             onMouseLeave={e => { e.currentTarget.style.borderColor = "#e2e8f0"; e.currentTarget.style.color = "#475569"; }}
           >
@@ -191,20 +227,26 @@ function EventCard({ event, isOwnEvent, onEdit, onDelete }) {
         )}
         {isOwnEvent ? (
           <>
-            <button onClick={() => onEdit(event)} style={{
-              flex: 1, background: "linear-gradient(135deg,#2563eb,#1d4ed8)",
-              border: "none", borderRadius: 8, padding: "7px 14px",
-              fontSize: 12.5, fontWeight: 700, color: "#fff",
-              cursor: "pointer", fontFamily: "inherit",
-              boxShadow: "0 2px 8px rgba(37,99,235,0.25)",
-            }}>
+            <button
+              onClick={() => onEdit(event)}
+              style={{
+                flex: 1, background: "linear-gradient(135deg,#2563eb,#1d4ed8)",
+                border: "none", borderRadius: 8, padding: "7px 14px",
+                fontSize: 12.5, fontWeight: 700, color: "#fff",
+                cursor: "pointer", fontFamily: "inherit",
+                boxShadow: "0 2px 8px rgba(37,99,235,0.25)",
+              }}
+            >
               Edit Event
             </button>
-            <button onClick={() => onDelete(event)} style={{
-              background: "#fff", border: "1.5px solid #fecaca", borderRadius: 8,
-              padding: "7px 14px", fontSize: 12.5, fontWeight: 700, color: "#ef4444",
-              cursor: "pointer", fontFamily: "inherit",
-            }}>
+            <button
+              onClick={() => onDelete(event)}
+              style={{
+                background: "#fff", border: "1.5px solid #fecaca", borderRadius: 8,
+                padding: "7px 14px", fontSize: 12.5, fontWeight: 700, color: "#ef4444",
+                cursor: "pointer", fontFamily: "inherit",
+              }}
+            >
               Delete
             </button>
           </>
@@ -218,185 +260,239 @@ function EventCard({ event, isOwnEvent, onEdit, onDelete }) {
           </div>
         )}
       </div>
-    {isOwnEvent && !isDraft && (
-      <>
-        <button
-          onClick={async () => {
-            if (!showRegistrants && registrants.length === 0) {
-              const data = await fetch(`/api/events/${event.id}/registrations`).then(r => r.json());
-              setRegistrants(data);
-            }
-            setShowRegistrants(p => !p);
-          }}
-          style={{
-            background: "none", border: "1.5px solid #e2e8f0", borderRadius: 8,
-            padding: "7px 14px", fontSize: 12.5, fontWeight: 600, color: "#475569",
-            cursor: "pointer", fontFamily: "inherit",
-          }}
-        >
-          👥 {showRegistrants ? "Hide" : "See"} Registrants
-        </button>
 
-        {showRegistrants && (
-          <div style={{
-            background: "#f8fafc", borderRadius: 10, padding: "12px 14px",
-            border: "1px solid #e2e8f0", marginTop: 4,
-          }}>
-            {/* Search bar */}
-            <input
-              placeholder="Search registrants…"
-              value={registrantSearch}
-              onChange={e => setRegistrantSearch(e.target.value)}
-              style={{
-                width: "100%", padding: "7px 12px", borderRadius: 8,
-                border: "1.5px solid #e2e8f0", fontSize: 13,
-                fontFamily: "inherit", marginBottom: 10, boxSizing: "border-box",
-                outline: "none",
-              }}
-            />
+      {/* Registrants section — only for own, non-draft events */}
+      {isOwnEvent && !isDraft && (
+        <>
+          <button
+            onClick={async () => {
+              if (!showRegistrants && registrants.length === 0) {
+                const data = await fetch(`/api/events/${event.id}/registrations`).then(r => r.json());
+                setRegistrants(data);
+              }
+              setShowRegistrants(p => !p);
+            }}
+            style={{
+              background: "none", border: "1.5px solid #e2e8f0", borderRadius: 8,
+              padding: "7px 14px", fontSize: 12.5, fontWeight: 600, color: "#475569",
+              cursor: "pointer", fontFamily: "inherit",
+            }}
+          >
+            👥 {showRegistrants ? "Hide" : "See"} Registrants
+          </button>
 
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b", marginBottom: 8 }}>
-              {registrants.length} volunteer{registrants.length !== 1 ? "s" : ""} registered
-            </div>
+          {showRegistrants && (
+            <div style={{
+              background: "#f8fafc", borderRadius: 10, padding: "12px 14px",
+              border: "1px solid #e2e8f0", marginTop: 4,
+            }}>
+              {/* Search */}
+              <input
+                placeholder="Search registrants…"
+                value={registrantSearch}
+                onChange={e => setRegistrantSearch(e.target.value)}
+                style={{
+                  width: "100%", padding: "7px 12px", borderRadius: 8,
+                  border: "1.5px solid #e2e8f0", fontSize: 13,
+                  fontFamily: "inherit", marginBottom: 10, boxSizing: "border-box",
+                  outline: "none",
+                }}
+              />
 
-            {registrants.length === 0 ? (
-              <p style={{ fontSize: 13, color: "#94a3b8" }}>No one registered yet.</p>
-            ) : registrants
-  .filter(r => r.full_name?.toLowerCase().includes(registrantSearch.toLowerCase()) ||
-               r.email?.toLowerCase().includes(registrantSearch.toLowerCase()))
-  .map((r, i) => (
-  <div key={i} style={{
-    background: "#fff", borderRadius: 10, padding: "10px 12px",
-    border: "1px solid #e2e8f0", marginBottom: 8,
-  }}>
-    {/* Name + status pills */}
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-      <div>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "#1e293b" }}>{r.full_name}</div>
-        <div style={{ fontSize: 11.5, color: "#64748b" }}>{r.email}</div>
-      </div>
-      <div style={{ display: "flex", gap: 6 }}>
-        {r.attended ? (
-          <span style={{
-            background: "#f0fdf4", color: "#15803d", fontSize: 11, fontWeight: 700,
-            padding: "2px 9px", borderRadius: 99, border: "1px solid #bbf7d0",
-          }}>✓ Checked In</span>
-        ) : (
-          <span style={{
-            background: "#fef9c3", color: "#854d0e", fontSize: 11, fontWeight: 700,
-            padding: "2px 9px", borderRadius: 99, border: "1px solid #fde68a",
-          }}>Not Checked In</span>
-        )}
-        {r.time_out ? (
-          <span style={{
-            background: "#eff6ff", color: "#1d4ed8", fontSize: 11, fontWeight: 700,
-            padding: "2px 9px", borderRadius: 99, border: "1px solid #bfdbfe",
-          }}>✓ Checked Out</span>
-        ) : r.attended ? (
-          <span style={{
-            background: "#fdf2f8", color: "#86198f", fontSize: 11, fontWeight: 700,
-            padding: "2px 9px", borderRadius: 99, border: "1px solid #f0abfc",
-          }}>Not Checked Out</span>
-        ) : null}
-      </div>
-    </div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b", marginBottom: 8 }}>
+                {registrants.length} volunteer{registrants.length !== 1 ? "s" : ""} registered
+              </div>
 
-    {/* Time inputs */}
-    <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.5 }}>
-          Time In
-        </label>
-        <input
-          type="datetime-local"
-          defaultValue={r.time_in ? r.time_in.slice(0, 16) : ""}
-          onChange={e => r._time_in = e.target.value}
-          style={{
-            padding: "5px 8px", borderRadius: 7, border: "1.5px solid #e2e8f0",
-            fontSize: 12, fontFamily: "inherit", outline: "none",
-          }}
-        />
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.5 }}>
-          Time Out
-        </label>
-        <input
-          type="datetime-local"
-          defaultValue={r.time_out ? r.time_out.slice(0, 16) : ""}
-          onChange={e => r._time_out = e.target.value}
-          style={{
-            padding: "5px 8px", borderRadius: 7, border: "1.5px solid #e2e8f0",
-            fontSize: 12, fontFamily: "inherit", outline: "none",
-          }}
-        />
-      </div>
+              {registrants.length === 0 ? (
+                <p style={{ fontSize: 13, color: "#94a3b8" }}>No one registered yet.</p>
+              ) : (
+                registrants
+                  .filter(r =>
+                    r.full_name?.toLowerCase().includes(registrantSearch.toLowerCase()) ||
+                    r.email?.toLowerCase().includes(registrantSearch.toLowerCase())
+                  )
+                  .map((r, i) => (
+                    <div key={i} style={{
+                      background: "#fff", borderRadius: 10, padding: "10px 12px",
+                      border: "1px solid #e2e8f0", marginBottom: 8,
+                    }}>
+                      {/* Name + email */}
+                      <div style={{ marginBottom: 8 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: "#1e293b" }}>{r.full_name}</div>
+                        <div style={{ fontSize: 11.5, color: "#64748b" }}>{r.email}</div>
+                      </div>
 
-      {/* Check In button */}
-      <button
-        onClick={async () => {
-          await fetch(`/api/events/${event.id}/checkin`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              volunteer_id: r.volunteer_id,
-              time_in: r._time_in || r.time_in || new Date().toISOString(),
-              time_out: r._time_out || r.time_out || null,
-            }),
-          });
-          const updated = await fetch(`/api/events/${event.id}/registrations`).then(res => res.json());
-          setRegistrants(updated);
-        }}
-        style={{
-          padding: "6px 14px", borderRadius: 8,
-          background: "#15803d", color: "#fff", border: "none",
-          fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
-        }}
-      >
-        ✓ Check In
-      </button>
+                      {/* Check-in row */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                        {r.attended ? (
+                          <span style={{
+                            background: "#f0fdf4", color: "#15803d", fontSize: 11, fontWeight: 700,
+                            padding: "2px 9px", borderRadius: 99, border: "1px solid #bbf7d0", flexShrink: 0,
+                          }}>✓ Checked In</span>
+                        ) : (
+                          <span style={{
+                            background: "#fef9c3", color: "#854d0e", fontSize: 11, fontWeight: 700,
+                            padding: "2px 9px", borderRadius: 99, border: "1px solid #fde68a", flexShrink: 0,
+                          }}>Not Checked In</span>
+                        )}
+                        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                          <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.5 }}>Time In</label>
+                          <input
+                            type="datetime-local"
+                            defaultValue={r.time_in ? r.time_in.slice(0, 16) : ""}
+                            onChange={e => r._time_in = e.target.value}
+                            style={{ padding: "5px 8px", borderRadius: 7, border: "1.5px solid #e2e8f0", fontSize: 12, fontFamily: "inherit", outline: "none" }}
+                          />
+                        </div>
+                        <button
+                          onClick={async () => {
+                            await fetch(`/api/events/${event.id}/checkin`, {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                volunteer_id: r.volunteer_id,
+                                time_in: r._time_in || r.time_in || new Date().toISOString(),
+                                time_out: r.time_out || null,
+                              }),
+                            });
+                            const updated = await fetch(`/api/events/${event.id}/registrations`).then(res => res.json());
+                            setRegistrants(updated);
+                          }}
+                          style={{
+                            padding: "6px 14px", borderRadius: 8, alignSelf: "flex-end",
+                            background: "#15803d", color: "#fff", border: "none",
+                            fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                          }}
+                        >
+                          ✓ Check In
+                        </button>
+                      </div>
 
-      {/* Check Out button — only show if checked in */}
-      {r.attended && (
-        <button
-          onClick={async () => {
-            await fetch(`/api/events/${event.id}/checkin`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                volunteer_id: r.volunteer_id,
-                time_in: r._time_in || r.time_in || null,
-                time_out: r._time_out || r.time_out || new Date().toISOString(),
-              }),
-            });
-            const updated = await fetch(`/api/events/${event.id}/registrations`).then(res => res.json());
-            setRegistrants(updated);
-          }}
-          style={{
-            padding: "6px 14px", borderRadius: 8,
-            background: "#1d4ed8", color: "#fff", border: "none",
-            fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
-          }}
-        >
-          → Check Out
-        </button>
+                      {/* Check-out row — only if checked in */}
+                      {r.attended && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                          {r.time_out ? (
+                            <span style={{
+                              background: "#eff6ff", color: "#1d4ed8", fontSize: 11, fontWeight: 700,
+                              padding: "2px 9px", borderRadius: 99, border: "1px solid #bfdbfe", flexShrink: 0,
+                            }}>✓ Checked Out</span>
+                          ) : (
+                            <span style={{
+                              background: "#fdf2f8", color: "#86198f", fontSize: 11, fontWeight: 700,
+                              padding: "2px 9px", borderRadius: 99, border: "1px solid #f0abfc", flexShrink: 0,
+                            }}>Not Checked Out</span>
+                          )}
+                          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                            <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.5 }}>Time Out</label>
+                            <input
+                              type="datetime-local"
+                              defaultValue={r.time_out ? r.time_out.slice(0, 16) : ""}
+                              onChange={e => r._time_out = e.target.value}
+                              style={{ padding: "5px 8px", borderRadius: 7, border: "1.5px solid #e2e8f0", fontSize: 12, fontFamily: "inherit", outline: "none" }}
+                            />
+                          </div>
+                          <button
+                            onClick={async () => {
+                              await fetch(`/api/events/${event.id}/checkin`, {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  volunteer_id: r.volunteer_id,
+                                  time_in: r.time_in || null,
+                                  time_out: r._time_out || r.time_out || new Date().toISOString(),
+                                }),
+                              });
+                              const updated = await fetch(`/api/events/${event.id}/registrations`).then(res => res.json());
+                              setRegistrants(updated);
+                            }}
+                            style={{
+                              padding: "6px 14px", borderRadius: 8, alignSelf: "flex-end",
+                              background: "#1d4ed8", color: "#fff", border: "none",
+                              fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                            }}
+                          >
+                            → Check Out
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Badge selector */}
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                          Award Badges
+                        </div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                          {availableBadges.map(b => {
+                            const isSelected = (selectedBadgesPerVolunteer[r.volunteer_id] ?? new Set()).has(b.id);
+                            return (
+                              <button
+                                key={b.id}
+                                onClick={() => {
+                                  setSelectedBadgesPerVolunteer(prev => {
+                                    const current = new Set(prev[r.volunteer_id] ?? []);
+                                    isSelected ? current.delete(b.id) : current.add(b.id);
+                                    return { ...prev, [r.volunteer_id]: current };
+                                  });
+                                }}
+                                style={{
+                                  padding: "3px 10px", borderRadius: 99, fontSize: 11, fontWeight: 600,
+                                  border: `1.5px solid ${isSelected ? "#15803d" : "#e2e8f0"}`,
+                                  background: isSelected ? "#f0fdf4" : "#f8fafc",
+                                  color: isSelected ? "#15803d" : "#64748b",
+                                  cursor: "pointer", fontFamily: "inherit",
+                                }}
+                              >
+                                {b.image_url
+                                  ? <img src={b.image_url} alt={b.name} style={{ width: 12, height: 12, borderRadius: "50%", marginRight: 4, verticalAlign: "middle" }} />
+                                  : "🏅 "
+                                }
+                                {b.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {(selectedBadgesPerVolunteer[r.volunteer_id]?.size ?? 0) > 0 && (
+                          <button
+                            onClick={async () => {
+                              const badgeIds = [...(selectedBadgesPerVolunteer[r.volunteer_id] ?? [])];
+                              for (const badgeId of badgeIds) {
+                                await fetch(`/api/volunteers/${r.volunteer_id}/badges`, {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ badge_id: badgeId }),
+                                });
+                              }
+                              setBadgesConfirmed(prev => ({ ...prev, [r.volunteer_id]: true }));
+                              setSelectedBadgesPerVolunteer(prev => ({ ...prev, [r.volunteer_id]: new Set() }));
+                              setTimeout(() => setBadgesConfirmed(prev => ({ ...prev, [r.volunteer_id]: false })), 2000);
+                            }}
+                            style={{
+                              padding: "6px 14px", borderRadius: 8, fontSize: 12, fontWeight: 700,
+                              background: badgesConfirmed[r.volunteer_id] ? "#15803d" : "#1d4ed8",
+                              color: "#fff", border: "none", cursor: "pointer", fontFamily: "inherit",
+                              alignSelf: "flex-start",
+                            }}
+                          >
+                            {badgesConfirmed[r.volunteer_id]
+                              ? "✓ Badges Confirmed!"
+                              : `Confirm ${selectedBadgesPerVolunteer[r.volunteer_id]?.size} Badge${selectedBadgesPerVolunteer[r.volunteer_id]?.size !== 1 ? "s" : ""}`
+                            }
+                          </button>
+                        )}
+                      </div>
+                    </div> // end registrant card
+                  ))
+              )}
+            </div> // end showRegistrants panel
+          )}
+        </> // end isOwnEvent && !isDraft fragment
       )}
-    </div>
-  </div>
-))}
-          </div>
-        )}
-      </>
-    )}
-    </div>
+    </div> // end top-level card div
   );
 }
 
 // ─── Create/Edit Event Modal ──────────────────────────────────────────────────
-const AVAILABLE_TAGS = [
-  "Environment", "Outdoors", "Family Friendly", "Physical Activity",
-  "Weekend", "Education", "Food & Hunger", "Elder Care", "Animals", "Health",
-];
 
 const AVAILABLE_BADGES = [
   { id: "top_volunteer", icon: "🏅", label: "Top Volunteer" },
@@ -408,7 +504,7 @@ const AVAILABLE_BADGES = [
 
 const STEPS = ["Details", "Location & Time", "Roles & Tags", "Photos & Badges"];
 
-function EventModal({ event, orgId, onClose, onSaved }) {
+function EventModal({ event, orgId, brandColors = [], onClose, onSaved }) {
   const isEdit = !!event;
   const photoInputRef = useRef(null);
 
@@ -437,6 +533,9 @@ function EventModal({ event, orgId, onClose, onSaved }) {
   const [errors, setErrors]   = useState({});
   const [loading, setLoading] = useState(false);
   const [submitErr, setSubmitErr] = useState(null);
+  const [newBadgeName, setNewBadgeName] = useState("");
+  const [newBadgeDesc, setNewBadgeDesc] = useState("");
+  const [newBadgeFile, setNewBadgeFile] = useState(null);
 
   // ── Fetch available tags + badges from DB ──
   const [availableTags, setAvailableTags] = useState([]);
@@ -884,7 +983,53 @@ function EventModal({ event, orgId, onClose, onSaved }) {
                   </div>
                 )}
               </div>
-
+              <div>
+              <label style={lbl}>Create a New Badge</label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, background: "#f8fafc", borderRadius: 10, padding: 12, border: "1.5px solid #e2e8f0" }}>
+                <input
+                  placeholder="Badge name"
+                  value={newBadgeName}
+                  onChange={e => setNewBadgeName(e.target.value)}
+                  style={{ ...inp(), width: "100%", boxSizing: "border-box" }}
+                />
+                <input
+                  placeholder="Description"
+                  value={newBadgeDesc}
+                  onChange={e => setNewBadgeDesc(e.target.value)}
+                  style={{ ...inp(), width: "100%", boxSizing: "border-box" }}
+                />
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <label style={{ fontSize: 12.5, color: "#64748b", cursor: "pointer" }}>
+                    <input
+                      type="file" accept=".png"
+                      style={{ display: "none" }}
+                      onChange={e => setNewBadgeFile(e.target.files[0])}
+                    />
+                    📎 {newBadgeFile ? newBadgeFile.name : "Upload PNG (optional)"}
+                  </label>
+                </div>
+                <button
+                  onClick={async () => {
+                    if (!newBadgeName.trim()) return;
+                    const fd = new FormData();
+                    fd.append("name", newBadgeName);
+                    fd.append("description", newBadgeDesc);
+                    if (newBadgeFile) fd.append("image", newBadgeFile);
+                    const res = await fetch("/api/badges", { method: "POST", body: fd });
+                    const badge = await res.json();
+                    setAvailableBadges(prev => [...prev, badge]);
+                    setSelectedBadges(prev => new Set([...prev, badge.id]));
+                    setNewBadgeName(""); setNewBadgeDesc(""); setNewBadgeFile(null);
+                  }}
+                  style={{
+                    background: "#15803d", color: "#fff", border: "none", borderRadius: 8,
+                    padding: "8px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                  }}
+                >
+                  + Create Badge
+                </button>
+              </div>
+            </div>
               <div>
                 <label style={lbl}>
                   Badges Offered{" "}
@@ -953,23 +1098,24 @@ function EventModal({ event, orgId, onClose, onSaved }) {
               cursor: "pointer", fontFamily: "inherit",
             }}>← Back</button>
           )}
-          {tab < STEPS.length - 1 ? (
-            <button onClick={() => setTab(t => t + 1)} style={{
-              flex: 1, padding: "20px 0", borderRadius: 20, border: "1.5px solid #e2e8f0",
-              background: "#f8fafc", color: "#15803d", fontSize: 13.5, fontWeight: 700,
+          {tab === STEPS.length - 1 && (
+          <>
+            <button onClick={() => handleSubmit("DRAFT")} disabled={loading} style={{
+              flex: 1, padding: "10px 0", borderRadius: 10, border: "1.5px solid #e2e8f0",
+              background: "#f8fafc", color: "#475569", fontSize: 13.5, fontWeight: 700,
               cursor: "pointer", fontFamily: "inherit",
-            }}>Next →</button>
-          ) : (
-            <>
-              <button onClick={() => handleSubmit("DRAFT")} disabled={loading} style={{
-                flex: 1, padding: "10px 0", borderRadius: 20, border: "1.5px solid #e2e8f0",
-                background: "#f8fafc", color: "#475569", fontSize: 13.5, fontWeight: 700,
-                cursor: "pointer", fontFamily: "inherit",
-              }}>
-                {loading ? "Saving…" : "Save as Draft"}
-              </button>
-            </>
-          )}
+            }}>
+              {loading ? "Saving…" : "Save as Draft"}
+            </button>
+            <button onClick={() => handleSubmit("PUBLISHED")} disabled={loading} style={{
+              flex: 2, padding: "10px 0", borderRadius: 10, border: "none",
+              background: "#15803d", color: "#fff", fontSize: 13.5, fontWeight: 700,
+              cursor: "pointer", fontFamily: "inherit",
+            }}>
+              {loading ? "Publishing…" : "Publish Event"}
+            </button>
+          </>
+        )}
         </div>
       </div>
     </div>
@@ -1123,7 +1269,8 @@ export default function OrgHome() {
   const filtered = allEvents.filter(ev => {
     const q = search.toLowerCase();
     const matchSearch = !q || ev.name?.toLowerCase().includes(q) || ev.description?.toLowerCase().includes(q) || ev.organization_name?.toLowerCase().includes(q);
-    const matchCat  = activeCategories.includes("All") || activeCategories.includes(ev.category);
+    const matchCat = activeCategories.includes("All") ||
+    (Array.isArray(ev.tags) && ev.tags.some(tag => activeCategories.includes(tag)));
     const maxDist   = { "< 1 mi": 1, "< 2 mi": 2, "< 5 mi": 5, "< 10 mi": 10 }[distanceFilter];
     const matchDist = !maxDist || (ev.distance_miles != null && ev.distance_miles < maxDist);
     const matchFrom = !dateFrom || new Date(ev.start_time) >= new Date(dateFrom);
@@ -1370,6 +1517,7 @@ export default function OrgHome() {
         <EventModal
           event={editingEvent}
           orgId={org?.id}
+          brandColors={org?.brand_colors ?? []}
           onClose={() => { setShowModal(false); setEditingEvent(null); }}
           onSaved={handleSavedEvent}
         />

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import "../styles/home.css";
 import logo from "../../assets/all4allLogo.png";
 
+
 // ─── API helpers ──────────────────────────────────────────────────────────────
 const API = {
   getVolunteer: async (userId) => {
@@ -148,7 +149,28 @@ function EventCard({ event, onViewDetails }) {
             )}
           </div>
           <h3 className="home-card__title">{event.name}</h3>
-          <p className="home-card__org">{event.organization_name}</p>
+          {/* Org name + logo */}
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
+              {event.organization_logo ? (
+                <img
+                  src={event.organization_logo}
+                  alt={event.organization_name}
+                  style={{ width: 18, height: 18, borderRadius: "50%", objectFit: "cover" }}
+                />
+              ) : (
+                <div style={{
+                  width: 18, height: 18, borderRadius: "50%",
+                  background: "linear-gradient(135deg,#15803d,#166534)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 9, fontWeight: 800, color: "#fff", flexShrink: 0,
+                }}>
+                  {(event.organization_name || "?")[0]}
+                </div>
+              )}
+              <p style={{ fontSize: 12.5, color: "#2563eb", fontWeight: 600, margin: 0 }}>
+                {event.organization_name || "Your Organization"}
+              </p>
+            </div>
         </div>
       </div>
           
@@ -165,6 +187,9 @@ function EventCard({ event, onViewDetails }) {
           ))}
         </div>
       )}
+      <div style={{ fontSize: 12.5, color: "#64748b", fontWeight: 600 }}>
+        👥 {event.volunteer_count ?? 0} volunteer{event.volunteer_count !== 1 ? "s" : ""} signed up
+      </div>
         
       </div>
       <div className="home-card__meta">
@@ -239,6 +264,7 @@ function EventDetailModal({
   const [carouselIdx, setCarouselIdx]     = useState(0);
   const slidesRef = useRef(null);
   const [roles, setRoles] = useState([]);
+  const [myRoleId, setMyRoleId] = useState(null);
 
   const brandColor = orgData?.brand_color || "#2e7d45";
   const brandLight = orgData?.brand_color ? `${orgData.brand_color}18` : "#e8f5ec";
@@ -247,11 +273,26 @@ function EventDetailModal({
   // Add this state + useEffect inside EventDetailModal
 
   useEffect(() => {
+    if (!event?.id || !volunteerId || !registered) return;
+    fetch(`/api/events/${event.id}/volunteer-role/${volunteerId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data?.role_id) setMyRoleId(data.role_id); })
+      .then(r => r.json())
+        .then(data => {
+          setMyRegisteredEvents(data);
+          // ✅ Pre-populate registration set so modal shows correct status
+          setMyRegistrations(new Set(data.map(ev => ev.id)));
+        })
+      .catch(console.error);
+  }, [event?.id, volunteerId, registered]);
+
+  useEffect(() => {
   if (!event?.id) return;
   fetch(`/api/events/${event.id}/registrations/count`)
     .then(r => r.json())
     .then(data => setRegistrantCount(data.total))
     .catch(console.error);
+
   fetch(`/api/events/${event.id}/roles`)
     .then(r => r.json())
     .then(data => setRoles(data.map(r => ({
@@ -357,28 +398,31 @@ function EventDetailModal({
         setRegistered(true);
         onRegisterChange?.(event.id, true);
         } else {
-      // Unregister from event
-      const res = await fetch(`/api/events/${event.id}/register`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ volunteer_id: volunteerId }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-
-      // Fetch ALL roles the volunteer is registered for, then unregister all
-      const allRoles = await fetch(`/api/events/${event.id}/roles`).then(r => r.json());
-      for (const role of allRoles) {
-        await fetch(`/api/roles/${role.id}/register`, {
+        const res = await fetch(`/api/events/${event.id}/register`, {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ volunteer_id: volunteerId }),
-        }).catch(() => {}); // silently ignore if not registered for this role
-      }
+        });
+        if (!res.ok) throw new Error(await res.text());
 
-      setSelectedRoles(new Set());
-      setRegistered(false);
-      onRegisterChange?.(event.id, false);
-    }
+        // Only unregister the specific role they were in
+        if (myRoleId) {
+          await fetch(`/api/roles/${myRoleId}/register`, {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ volunteer_id: volunteerId }),
+          }).catch(() => {});
+        }
+
+        setMyRoleId(null);
+        setSelectedRoles(new Set());
+        setRegistered(false);
+        onRegisterChange?.(event.id, false);
+
+        // Refresh roles
+        const updatedRoles = await fetch(`/api/events/${event.id}/roles`).then(r => r.json());
+        setRoles(updatedRoles.map(r => ({ ...r, spots_available: r.spots - parseInt(r.filled) })));
+      }
     } catch (err) {
       console.error(err);
       alert("Something went wrong. Please try again.");
@@ -506,19 +550,24 @@ function EventDetailModal({
                   {orgData?.name ?? "Loading…"}
                 </div>
                 {badges.length > 0 && (
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
                     {badges.map(b => (
-                      <img
-                        key={b.id}
-                        src={b.image_url}
-                        alt={b.name}
-                        title={b.name}
-                        style={{
-                          width: 34, height: 34, borderRadius: "50%",
-                          border: `2px solid ${brandColor}`,
-                          objectFit: "cover",
-                        }}
-                      />
+                      <div key={b.id} style={{
+                        display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
+                        minWidth: 48,
+                      }}>
+                        {b.image_url ? (
+                          <img
+                            src={b.image_url} alt={b.name} title={b.name}
+                            style={{ width: 34, height: 34, borderRadius: "50%", border: `2px solid ${brandColor}`, objectFit: "cover" }}
+                          />
+                        ) : (
+                          <span style={{ fontSize: 28 }} title={b.name}>🏅</span>
+                        )}
+                        <span style={{ fontSize: 10, fontWeight: 600, color: "#555", textAlign: "center", maxWidth: 56, lineHeight: 1.2 }}>
+                          {b.name}
+                        </span>
+                      </div>
                     ))}
                   </div>
                 )}
@@ -731,20 +780,47 @@ function EventDetailModal({
               padding: "14px 20px",
               background: "#fff", borderTop: "1px solid #f0f0f0", flexShrink: 0,
             }}>
-              <button
-                className="ev-reg-btn"
-                onClick={handleRegister}
-                disabled={loading}
-                style={{
-                  width: "100%", padding: 14, border: "none", borderRadius: 12,
-                  background: registered ? "#c0392b" : brandColor,
-                  color: "#fff", fontSize: 15, fontWeight: 700, cursor: "pointer",
-                  letterSpacing: .3, transition: "opacity .15s, transform .1s",
-                  opacity: loading ? .7 : 1,
-                }}
-              >
-                {loading ? "…" : registered ? "Unregister" : "Register for this Event"}
-              </button>
+              {registered ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{
+                    width: "100%", padding: 14, borderRadius: 12,
+                    background: "#f0fdf4", border: "1.5px solid #bbf7d0",
+                    color: "#15803d", fontSize: 14, fontWeight: 700,
+                    textAlign: "center", letterSpacing: .3,
+                  }}>
+                    ✓ You're Registered!
+                  </div>
+                  <button
+                    className="ev-reg-btn"
+                    onClick={handleRegister}
+                    disabled={loading}
+                    style={{
+                      width: "100%", padding: 10, border: "1.5px solid #fecaca",
+                      borderRadius: 12, background: "#fff",
+                      color: "#ef4444", fontSize: 13, fontWeight: 700, cursor: "pointer",
+                      letterSpacing: .3, transition: "opacity .15s",
+                      opacity: loading ? .7 : 1,
+                    }}
+                  >
+                    {loading ? "…" : "Unregister"}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  className="ev-reg-btn"
+                  onClick={handleRegister}
+                  disabled={loading}
+                  style={{
+                    width: "100%", padding: 14, border: "none", borderRadius: 12,
+                    background: brandColor,
+                    color: "#fff", fontSize: 15, fontWeight: 700, cursor: "pointer",
+                    letterSpacing: .3, transition: "opacity .15s, transform .1s",
+                    opacity: loading ? .7 : 1,
+                  }}
+                >
+                  {loading ? "…" : "Register for this Event"}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -798,29 +874,33 @@ function MyEventsSlider({ events, onViewDetails, open, onToggle }) {
             </p>
           ) : events.map(ev => (
             <div
-              key={ev.id}
-              onClick={() => onViewDetails(ev)}
-              style={{
-                minWidth: 200, background: "#f0fdf4", borderRadius: 12,
-                padding: "12px 14px", cursor: "pointer",
-                border: "1.5px solid #bbf7d0", flexShrink: 0,
-                transition: "transform 0.15s",
-              }}
-              onMouseEnter={e => e.currentTarget.style.transform = "translateY(-2px)"}
-              onMouseLeave={e => e.currentTarget.style.transform = ""}
-            >
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#15803d", marginBottom: 4 }}>
-                {ev.name}
-              </div>
-              <div style={{ fontSize: 11.5, color: "#64748b" }}>
-                📅 {new Date(ev.start_time).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-              </div>
-              {ev.city && (
-                <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 2 }}>
-                  📍 {ev.city}, {ev.state}
-                </div>
-              )}
+            key={ev.id}
+            onClick={() => onViewDetails(ev)}
+            style={{
+              minWidth: 200, background: "#f0fdf4", borderRadius: 12,
+              padding: "12px 14px", cursor: "pointer",
+              border: "1.5px solid #bbf7d0", flexShrink: 0,
+              transition: "transform 0.15s",
+            }}
+            onMouseEnter={e => e.currentTarget.style.transform = "translateY(-2px)"}
+            onMouseLeave={e => e.currentTarget.style.transform = ""}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#15803d" }}>{ev.name}</div>
+              <span style={{
+                background: "#15803d", color: "#fff", fontSize: 10, fontWeight: 700,
+                padding: "1px 7px", borderRadius: 99, flexShrink: 0, marginLeft: 6,
+              }}>✓ Registered</span>
             </div>
+            <div style={{ fontSize: 11.5, color: "#64748b" }}>
+              📅 {new Date(ev.start_time).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+            </div>
+            {ev.city && (
+              <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 2 }}>
+                📍 {ev.city}, {ev.state}
+              </div>
+            )}
+          </div>
           ))}
         </div>
       )}
@@ -886,14 +966,17 @@ export default function VolunteerHome() {
         return fetch(`/api/volunteers/${currentUser.id}/registrations`);
       })
       .then(r => r.json())
-      .then(setMyRegisteredEvents)
-      .catch(console.error)
+      .then(data => {
+        setMyRegisteredEvents(data);
+        setMyRegistrations(new Set(data.map(ev => ev.id))); // ✅ pre-populate on load
+      })
       .finally(() => setLoading(false));
-    
+
+          
   }, []);
 
   useEffect(() => {
-    fetch("/api/orgCategories")
+    fetch("/api/eventCategories")
       .then(res => res.json())
       .then(data => setCategories(["All", ...data]))
       .catch(() => setCategoryErr("Could not load categories."));
@@ -902,7 +985,8 @@ export default function VolunteerHome() {
   const filtered = events.filter(ev => {
     const q = search.toLowerCase();
     const matchSearch = !q || ev.name?.toLowerCase().includes(q) || ev.description?.toLowerCase().includes(q) || ev.organization_name?.toLowerCase().includes(q) || ev.city?.toLowerCase().includes(q);
-    const matchCat  = activeCategories.includes("All") || activeCategories.includes(ev.category);
+    const matchCat = activeCategories.includes("All") ||
+  (Array.isArray(ev.tags) && ev.tags.some(tag => activeCategories.includes(tag)));
     const maxDist   = { "< 1 mi": 1, "< 2 mi": 2, "< 5 mi": 5, "< 10 mi": 10 }[distanceFilter];
     const matchDist = !maxDist || (ev.distance_miles != null && ev.distance_miles < maxDist);
     const matchFrom = !dateFrom || new Date(ev.start_time) >= new Date(dateFrom);
@@ -916,6 +1000,14 @@ export default function VolunteerHome() {
       nowRegistered ? next.add(eventId) : next.delete(eventId);
       return next;
     });
+
+    // ✅ Keep the slider list in sync
+    if (!nowRegistered) {
+      setMyRegisteredEvents(prev => prev.filter(e => e.id !== eventId));
+    } else if (activeEvent) {
+      setMyRegisteredEvents(prev => [...prev, activeEvent]);
+    }
+
     setToast(nowRegistered ? "Registered! 🎉" : "Unregistered successfully.");
     setTimeout(() => setToast(null), 3500);
   }
@@ -1080,7 +1172,7 @@ export default function VolunteerHome() {
               <EventCard
                 key={ev.id}
                 event={ev}
-                onViewDetails={setActiveEvent} // ✅ opens modal
+                onViewDetails={setActiveEvent} 
               />
             ))}
           </div>
