@@ -72,7 +72,8 @@ CREATE TABLE events (
     state TEXT,
     zip_code VARCHAR(10) NOT NULL,
     color TEXT DEFAULT '#15803d',
-    CHECK (end_time > start_time) -- ensures that the end time is after the start time
+    CHECK (end_time > start_time),
+    recurrence TEXT DEFAULT NULL
 );
 
 

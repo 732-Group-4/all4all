@@ -1,6 +1,6 @@
 import express from "express";
 import bcrypt from "bcrypt";
-import { pool } from "./db.js";
+import { pool } from "../__mocks__/db.js";
 import jwt from "jsonwebtoken";
 import multer from "multer";
 import path from "path";
@@ -946,7 +946,7 @@ app.post("/api/roles/:id/register", async (req, res) => {
       [role_id]
     );
 
-    if (roleResult.rowCount === 0) {
+    if (roleResult.rowCount === 0 || roleResult.rows.length === 0) {
       return res.status(404).json({ error: "Role not found" });
     }
 

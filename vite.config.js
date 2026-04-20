@@ -8,11 +8,17 @@ export default defineConfig({
       "/api": {
         target: "http://localhost:3001",
         changeOrigin: true
+      },
+      "/uploads": {
+        target: "http://localhost:3001", 
+        changeOrigin: true
       }
     }
   },
   test: {
-    environment: "jsdom",
+    environment: "node",
     globals: true
   }
 });
+
+
