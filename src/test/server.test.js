@@ -3,8 +3,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import supertest from "supertest";
 
 // Mock the database module before importing the app
-vi.mock("../__mocks__/db.js");
-import { pool } from "../../__mocks__/db.js";
+vi.mock("../backend/db.js", () => {
+  const pool = {
+    query: vi.fn(),
+    connect: vi.fn(),
+  };
+  return { pool };
+});
+
+import { pool } from "../backend/db.js";
 import app from "../backend/server.js";
 
 const request = supertest(app);
@@ -28,7 +35,7 @@ describe("POST /api/registerVolunteer", () => {
   it("creates a new volunteer successfully", async () => {
     const client = mockClient(
       { rows: [] },                        // BEGIN
-      { rows: [{ id: 1 }] },              // INSERT into users
+      { rows: [{ id: 1 }] },              // INSERT into users (via createUser)
       { rows: [{ id: 10 }] },             // INSERT into volunteers
       { rows: [] }                         // COMMIT
     );
@@ -58,7 +65,7 @@ describe("POST /api/registerVolunteer", () => {
 
   it("returns 409 when username/email already exists", async () => {
     const client = mockClient({ rows: [] }); // BEGIN
-    client.query.mockRejectedValueOnce({ code: "23505" }); // duplicate key
+    client.query.mockRejectedValueOnce({ code: "23505" }); // duplicate key on INSERT users
 
     const res = await request.post("/api/registerVolunteer").send({
       username: "janedoe",
@@ -78,7 +85,7 @@ describe("POST /api/registerOrg", () => {
   it("creates a new organization successfully", async () => {
     const client = mockClient(
       { rows: [] },                        // BEGIN
-      { rows: [{ id: 2 }] },              // INSERT into users
+      { rows: [{ id: 2 }] },              // INSERT into users (via createUser)
       { rows: [{ id: 20 }] },             // INSERT into organizations
       { rows: [] }                         // COMMIT
     );
@@ -132,7 +139,6 @@ describe("POST /api/login", () => {
   });
 
   it("returns 401 when password is wrong", async () => {
-    // bcrypt.compare will return false for a non-matching hash
     pool.query.mockResolvedValueOnce({
       rowCount: 1,
       rows: [{ id: 1, email: "jane@test.com", password_hash: "badhash", role: "VOLUNTEER" }],
@@ -199,7 +205,7 @@ describe("GET /api/events", () => {
 
 describe("POST /api/events", () => {
   it("creates a new draft event", async () => {
-    const client = mockClient({ rows: [{ id: 42 }] });
+    const client = mockClient({ rows: [{ id: 42 }] }); // INSERT returning id
 
     const res = await request.post("/api/events").send({
       organization_id: 1,
@@ -396,7 +402,7 @@ describe("GET /api/events/:id/registrations/count", () => {
 
 describe("POST /api/events/:id/checkin", () => {
   it("checks in a volunteer", async () => {
-    const client = mockClient({ rows: [] });
+    const client = mockClient({ rows: [] }); // UPDATE query
 
     const res = await request.post("/api/events/1/checkin").send({
       volunteer_id: 10,
@@ -415,7 +421,7 @@ describe("POST /api/events/:id/checkin", () => {
 describe("POST /api/events/:id/roles", () => {
   it("saves roles for an event", async () => {
     const client = mockClient(
-      { rows: [] }, // DELETE existing
+      { rows: [] }, // DELETE existing roles
       { rows: [] }, // INSERT role 1
       { rows: [] }  // INSERT role 2
     );
@@ -453,8 +459,8 @@ describe("GET /api/events/:id/roles", () => {
 describe("POST /api/roles/:id/register", () => {
   it("registers a volunteer for a role with available spots", async () => {
     const client = mockClient(
-      { rows: [{ spots: 5, filled: "2" }] }, // spot check
-      { rows: [] }                            // INSERT
+      { rows: [{ spots: 5, filled: "2" }] }, // spot check query
+      { rows: [] }                            // INSERT registration
     );
 
     const res = await request.post("/api/roles/1/register").send({ volunteer_id: 10 });
@@ -887,8 +893,8 @@ describe("GET /api/full_name", () => {
 
   it("returns name for an org user when volunteer lookup fails", async () => {
     pool.query
-      .mockResolvedValueOnce({ rowCount: 0, rows: [] })                       // no volunteer
-      .mockResolvedValueOnce({ rowCount: 1, rows: [{ name: "Test Org" }] }); // org hit
+      .mockResolvedValueOnce({ rowCount: 0, rows: [] })
+      .mockResolvedValueOnce({ rowCount: 1, rows: [{ name: "Test Org" }] });
 
     const res = await request.get("/api/full_name").query({ user_id: 2 });
     expect(res.status).toBe(200);
@@ -897,8 +903,8 @@ describe("GET /api/full_name", () => {
 
   it("returns 404 when user is not found", async () => {
     pool.query
-      .mockResolvedValueOnce({ rowCount: 0, rows: [] }) // no volunteer
-      .mockResolvedValueOnce({ rowCount: 0, rows: [] }); // no org
+      .mockResolvedValueOnce({ rowCount: 0, rows: [] })
+      .mockResolvedValueOnce({ rowCount: 0, rows: [] });
 
     const res = await request.get("/api/full_name").query({ user_id: 999 });
     expect(res.status).toBe(404);
