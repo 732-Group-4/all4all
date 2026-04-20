@@ -26,6 +26,7 @@ export default function OrgForm({ onSwitch }) {
     const [passErr, setPassErr] = useState(null);
     const [showPass, setShowPass]= useState(false);
     const [confirm, setConfirm] = useState("");
+    const [confirm, setConfirm] = useState("");
     const [confirmErr, setConfirmErr] = useState(null);
     const str = getPasswordStrength(password);
 

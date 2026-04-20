@@ -95,6 +95,7 @@ app.post("/api/registerVolunteer", async (req, res) => {
 
     await client.query("BEGIN");
     transactionStarted = true;
+    transactionStarted = true;
 
     const user_id = await createUser(client, username, email, password, phone, "VOLUNTEER");
 
@@ -107,10 +108,14 @@ app.post("/api/registerVolunteer", async (req, res) => {
 
     await client.query("COMMIT");
     transactionStarted = false;
+    transactionStarted = false;
 
     res.json({ id: volunteerResult.rows[0].id });
 
   } catch (err) {
+    if (transactionStarted) {
+      await client.query("ROLLBACK");
+    }
     if (transactionStarted) {
       await client.query("ROLLBACK");
     }
@@ -134,11 +139,13 @@ app.post("/api/registerVolunteer", async (req, res) => {
 app.post("/api/registerOrg", async (req, res) => {
   const client = await pool.connect();
   let transactionStarted = false;
+  let transactionStarted = false;
 
   try {
     const { username, name, email, phone, description, password, category_id, zip_code, address, brand_colors } = req.body;
 
     await client.query("BEGIN");
+    transactionStarted = true;
     transactionStarted = true;
 
     const user_id = await createUser(client, username, email, password, phone, "ORGANIZATION");
@@ -150,10 +157,15 @@ app.post("/api/registerOrg", async (req, res) => {
 
     await client.query("COMMIT");
     transactionStarted = false;
+    transactionStarted = false;
 
+    res.json({ id: orgResult.rows[0].id });
     res.json({ id: orgResult.rows[0].id });
 
   } catch (err) {
+    if (transactionStarted) {
+      await client.query("ROLLBACK");
+    }
     if (transactionStarted) {
       await client.query("ROLLBACK");
     }
@@ -720,6 +732,7 @@ app.get("/api/full_name", async (req, res) => {
     if (result.rowCount === 0) {
       org = true;
       result = await pool.query(
+        "SELECT name FROM organizations WHERE user_id = $1",
         "SELECT name FROM organizations WHERE user_id = $1",
         [user_id]
       );

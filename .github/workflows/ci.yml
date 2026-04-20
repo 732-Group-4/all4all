@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'
+  pull_request:
+    branches:
+      - main
+  release:
+    types: [created]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          registry-url: https://npm.pkg.github.com/
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Start PostgreSQL via Docker Compose
+        run: docker compose up -d
+
+      - name: Wait for PostgreSQL to be ready
+        run: |
+          until docker exec pg_test pg_isready -U testuser; do
+            echo "Waiting for postgres..."
+            sleep 2
+          done
+
+      - name: Start dev server
+        run: npm run dev &
+        working-directory: src
+
+      - name: Wait for dev server to be ready
+        run: |
+          until curl -s http://localhost:5173 > /dev/null; do
+            echo "Waiting for dev server..."
+            sleep 2
+          done
+
+      - name: Run tests with coverage
+        run: npx vitest run --coverage
+        env:
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+
+      - name: Set up ChromeDriver
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Run Selenium tests
+        run: npm run test:e2e
+        env:
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+
+    # Only run for tags OR releases (never PRs or normal pushes)
+    if: |
+      startsWith(github.ref, 'refs/tags/') ||
+      github.event_name == 'release'
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js for publishing
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://npm.pkg.github.com/
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build project
+        run: npm run build
+
+      - name: Configure npm for GitHub Packages
+        run: |
+          echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish package
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

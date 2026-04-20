@@ -1,609 +1,694 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import supertest from "supertest";
-import app from "./server.js";
+/* eslint-disable no-undef */
+const { Builder, By, until, Key } = require("selenium-webdriver");
+const chrome = require('selenium-webdriver/chrome');
 
-const request = supertest(app);
+// Single shared driver for all tests
+const options = new chrome.Options();
+if (process.env.CI) {
+  options.addArguments('--headless');
+}
+options.addArguments('--no-sandbox');
+options.addArguments('--disable-dev-shm-usage');
+const driver = new Builder().forBrowser('chrome').setChromeOptions(options).build();
 
-// ─── Shared test state ────────────────────────────────────────────────────────
-let volunteerUserId;
-let volunteerId;
-let orgUserId;
-let orgId;
-let eventId;
-let roleId;
-let badgeId;
-
-// ─── Auth & Registration ──────────────────────────────────────────────────────
-describe("POST /api/registerVolunteer", () => {
-  it("creates a new volunteer account", async () => {
-    const res = await request.post("/api/registerVolunteer").send({
-      username: `vol_${Date.now()}`,
-      email: `vol_${Date.now()}@test.com`,
-      password: "password123",
-      firstName: "Jane",
-      lastName: "Doe",
-      phone: "5855550001",
-    });
-    expect(res.status).toBe(200);
-    expect(res.body).toHaveProperty("id");
-    volunteerId = res.body.id;
-  });
-
-  it("returns 400 when required fields are missing", async () => {
-    const res = await request.post("/api/registerVolunteer").send({
-      email: "missing@test.com",
-      password: "password123",
-    });
-    expect(res.status).toBe(400);
-    expect(res.body).toHaveProperty("error");
-  });
-
-  it("returns 409 when username/email already exists", async () => {
-    const payload = {
-      username: "duplicate_vol",
-      email: "duplicate_vol@test.com",
-      password: "password123",
-      firstName: "Jane",
-      lastName: "Doe",
-      phone: "5855550001",
-    };
-    await request.post("/api/registerVolunteer").send(payload);
-    const res = await request.post("/api/registerVolunteer").send(payload);
-    expect(res.status).toBe(409);
-  });
+afterAll(async () => {
+  const coverage = await driver.executeScript('return window.__coverage__');
+  const fs = require('fs');
+  fs.mkdirSync('./.nyc_output', { recursive: true });
+  fs.writeFileSync(
+    `./.nyc_output/coverage-${Date.now()}.json`,
+    JSON.stringify(coverage)
+  );
+  await driver.quit();
 });
 
-describe("POST /api/registerOrg", () => {
-  it("creates a new organization account", async () => {
-    const res = await request.post("/api/registerOrg").send({
-      username: `org_${Date.now()}`,
-      name: "Test Org",
-      email: `org_${Date.now()}@test.com`,
-      phone: "5855550002",
-      description: "A test org",
-      password: "password123",
-      category_id: 1,
-      zip_code: "14604",
-      address: "123 Main St",
-      brand_colors: ["#15803d"],
-    });
-    expect(res.status).toBe(200);
-    expect(res.body).toHaveProperty("id");
-    orgId = res.body.id;
-  });
+describe("Home Page", () => {
+  /**
+   * Tests that the page properly loads and the text appears
+   */
+  test("Load the page", async () => {
+    await driver.get("http://localhost:5173");
 
-  it("returns 409 when org email already exists", async () => {
-    const payload = {
-      username: "duplicate_org",
-      name: "Dupe Org",
-      email: "duplicate_org@test.com",
-      phone: "5855550003",
-      password: "password123",
-      category_id: 1,
-      zip_code: "14604",
-      address: "123 Main St",
-    };
-    await request.post("/api/registerOrg").send(payload);
-    const res = await request.post("/api/registerOrg").send(payload);
-    expect(res.status).toBe(409);
-  });
+    // Wait up to 10s for the logo div to appear
+    const logo = await driver.wait(
+      until.elementLocated(By.className("a4a-logo")),
+      10000
+    );
+
+    const text = await logo.getText();
+    expect(text).toBe("All4All");
+  }, 30000);
+
+  /**
+   * On the Sign-in page there is a button telling the user to create an account
+   * This tests that once clicked it brings them to the volunteers page
+   */
+  test("Create Account Switch", async () => {
+    const buttons = await driver.wait(
+      until.elementsLocated(By.className("a4a-switch-btn")),
+      10000
+    );
+    await buttons[0].click();
+
+    // Assert the "Join as Volunteer" tab button now has the active class
+    const activeTab = await driver.wait(
+      until.elementLocated(By.css(".a4a-tab.active")),
+      10000
+    );
+
+    expect(await activeTab.getText()).toBe("Join as Volunteer");
+  }, 30000);
+
+  /**
+   * On the volunteers page, there is a button at the bottom, when clicked, it
+   * should bring the user over to the organizations page
+   */
+  test("Organization Switch", async () => {
+    // click on the volunteer tab
+    const tab = await driver.wait(
+      until.elementLocated(By.xpath("//button[text()='Join as Volunteer']")),
+      10000
+    );
+    await tab.click();
+
+    const buttons = await driver.wait(
+      until.elementsLocated(By.className("a4a-switch-btn")),
+      10000
+    );
+    await buttons[0].click(); // click the switch button
+
+    const activeTab = await driver.wait(
+      until.elementLocated(By.css(".a4a-tab.active")),
+      10000
+    );
+
+    expect(await activeTab.getText()).toBe("Register Org");
+  }, 30000);
+
+  /**
+   * On the organizations page, there is a button on the bottom, when clicked
+   * it should bring the user to the volunteers page
+   */
+  test("Org to Volunteer Switch", async () => {
+    // click into the org tab
+    const tab = await driver.wait(
+      until.elementLocated(By.xpath("//button[text()='Register Org']")),
+      10000
+    );
+    await tab.click();
+
+    const buttons = await driver.wait(
+      until.elementsLocated(By.className("a4a-switch-btn")),
+      10000
+    );
+    await buttons[0].click();
+
+    const activeTab = await driver.wait(
+      until.elementLocated(By.css(".a4a-tab.active")),
+      10000
+    );
+
+    expect(await activeTab.getText()).toBe("Join as Volunteer");
+  }, 30000);
+
+  /**
+   * When a user is attempting to sign in, if either the username or passwords fields
+   * are left blank it will display an error message
+   */
+  test("Not Enough Provided Sign In", async () => {
+    // make sure to be on the sign in tab
+    const tab = await driver.wait(
+      until.elementLocated(By.xpath("//button[text()='Sign In']")),
+      10000
+    );
+    await tab.click();
+
+    // click the button with nothing filled in
+    const buttons = await driver.wait(
+      until.elementsLocated(By.className("a4a-btn")),
+      10000
+    );
+    await buttons[0].click();
+
+    let error;
+
+     // Wait for the error message to appear and assert
+    error = await driver.wait(
+      until.elementLocated(By.className("a4a-err")),
+      10000
+    );
+
+    expect(await error.getText()).toBe("Please fill in all fields.");
+
+    const usernameInput = await driver.wait(
+      until.elementLocated(By.css("input[placeholder='Your Username']")),
+      10000
+    );
+    await usernameInput.sendKeys("testuser");
+    await buttons[0].click(); // click with only the username typed in
+
+    error = await driver.wait(
+      until.elementLocated(By.className("a4a-err")),
+      10000
+    );
+
+    expect(await error.getText()).toBe("Please fill in all fields.");
+    
+    await usernameInput.sendKeys(Key.CONTROL + "a", Key.DELETE); //reset
+
+    const passwordInput = await driver.wait(
+      until.elementLocated(By.css("input[placeholder='Your Password']")),
+      10000
+    );
+    await passwordInput.sendKeys("testpassword");
+    await buttons[0].click(); // click with only the password
+
+    error = await driver.wait(
+      until.elementLocated(By.className("a4a-err")),
+      10000
+    );
+
+    expect(await error.getText()).toBe("Please fill in all fields.");
+
+  }, 30000);
+
+
+
 });
 
-describe("POST /api/login", () => {
-  it("returns a token and user on valid credentials", async () => {
-    const username = `login_test_${Date.now()}`;
-    await request.post("/api/registerVolunteer").send({
-      username,
-      email: `${username}@test.com`,
-      password: "password123",
-      firstName: "Test",
-      lastName: "User",
-      phone: "5855550010",
-    });
-
-    const res = await request.post("/api/login").send({
-      username,
-      password: "password123",
-    });
-    expect(res.status).toBe(200);
-    expect(res.body).toHaveProperty("token");
-    expect(res.body.user).toHaveProperty("id");
-    expect(res.body.user).toHaveProperty("role");
-    volunteerUserId = res.body.user.id;
+describe("OrgForm", () => {
+  // Helper: navigate to the OrgForm tab before each test
+  beforeEach(async () => {
+    await driver.get("http://localhost:5173");
+    const tab = await driver.wait(
+      until.elementLocated(By.xpath("//button[text()='Register Org']")),
+      10000
+    );
+    await tab.click();
   });
 
-  it("returns 401 for wrong password", async () => {
-    const res = await request.post("/api/login").send({
-      username: "nonexistent_user",
-      password: "wrongpassword",
-    });
-    expect(res.status).toBe(401);
-  });
-});
+  // ─── FIELD VISIBILITY ────────────────────────────────────────────────────────
 
-describe("GET /api/checkEmail", () => {
-  it("returns available: true for an unused email", async () => {
-    const res = await request.get("/api/checkEmail").query({ email: "totally_new@test.com" });
-    expect(res.status).toBe(200);
-    expect(res.body.available).toBe(true);
-  });
+  /**
+   * Confirms all required form fields are present on the OrgForm
+   */
+  test("OrgForm renders all required fields", async () => {
+    await driver.wait(until.elementLocated(By.css("input[placeholder='green_earth_org']")), 10000);
 
-  it("returns 400 when email query param is missing", async () => {
-    const res = await request.get("/api/checkEmail");
-    expect(res.status).toBe(400);
-  });
-});
+    const fields = await Promise.all([
+      driver.findElement(By.css("input[placeholder='green_earth_org']")),
+      driver.findElement(By.css("input[placeholder='Green Earth Foundation']")),
+      driver.findElement(By.css("input[placeholder='info@org.org']")),
+      driver.findElement(By.css("input[placeholder='(555) 000-0000']")),
+      driver.findElement(By.css("input[placeholder='Create a password']")),
+      driver.findElement(By.css("input[placeholder='Repeat password']")),
+      driver.findElement(By.css("input[placeholder='90210']")),
+      driver.findElement(By.css("textarea[placeholder^='We plant trees']")),
+    ]);
 
-// ─── Events ───────────────────────────────────────────────────────────────────
-describe("POST /api/events", () => {
-  it("creates a new draft event", async () => {
-    const res = await request.post("/api/events").send({
-      organization_id: orgId ?? 1,
-      name: "Test Cleanup Day",
-      description: "A test volunteer event",
-      start_time: "2026-06-01T09:00:00",
-      end_time: "2026-06-01T12:00:00",
-      address: "123 Main St",
-      city: "Rochester",
-      state: "NY",
-      zip_code: "14604",
-      color: "#15803d",
-    });
-    expect(res.status).toBe(200);
-    expect(res.body).toHaveProperty("id");
-    eventId = res.body.id;
-  });
-
-  it("returns 400 when required fields are missing", async () => {
-    const res = await request.post("/api/events").send({
-      name: "Incomplete Event",
-    });
-    expect(res.status).toBe(400);
-    expect(res.body).toHaveProperty("error");
-  });
-});
-
-describe("PUT /api/events/:id", () => {
-  it("updates an existing event", async () => {
-    const res = await request.put(`/api/events/${eventId}`).send({
-      name: "Updated Cleanup Day",
-      description: "Updated description",
-      start_time: "2026-06-01T09:00:00",
-      end_time: "2026-06-01T12:00:00",
-      address: "456 Oak Ave",
-      city: "Rochester",
-      state: "NY",
-      zip_code: "14604",
-      color: "#1d4ed8",
-      recurrence: "weekly",
-    });
-    expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
-  });
-
-  it("returns 404 for a non-existent event", async () => {
-    const res = await request.put("/api/events/999999").send({
-      name: "Ghost Event",
-      description: "Doesn't exist",
-      start_time: "2026-06-01T09:00:00",
-      end_time: "2026-06-01T12:00:00",
-      zip_code: "14604",
-    });
-    expect(res.status).toBe(404);
-  });
-});
-
-describe("PUT /api/events/:id/publish", () => {
-  it("publishes a draft event", async () => {
-    const res = await request.put(`/api/events/${eventId}/publish`);
-    expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
-  });
-
-  it("returns 404 for a non-existent event", async () => {
-    const res = await request.put("/api/events/999999/publish");
-    expect(res.status).toBe(404);
-  });
-});
-
-describe("GET /api/events", () => {
-  it("returns an array of published events", async () => {
-    const res = await request.get("/api/events");
-    expect(res.status).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
-  });
-
-  it("every returned event has a PUBLISHED status", async () => {
-    const res = await request.get("/api/events");
-    for (const ev of res.body) {
-      expect(ev.status).toBe("PUBLISHED");
+    for (const field of fields) {
+      expect(await field.isDisplayed()).toBe(true);
     }
-  });
-});
+  }, 30000);
 
-describe("PUT /api/events/:id/cancel", () => {
-  it("cancels a published event", async () => {
-    const res = await request.put(`/api/events/${eventId}/cancel`);
-    expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
-  });
+  // ─── SUBMIT VALIDATION ───────────────────────────────────────────────────────
 
-  it("returns 404 for a non-existent event", async () => {
-    const res = await request.put("/api/events/999999/cancel");
-    expect(res.status).toBe(404);
-  });
-});
+  /**
+   * Clicking Register with no fields filled should show a submit error
+   */
+  test("Submit with empty form shows error", async () => {
+    const submitBtn = await driver.wait(
+      until.elementLocated(By.xpath("//button[text()='Register Organization']")),
+      10000
+    );
+    await submitBtn.click();
 
-// ─── Event Registrations ──────────────────────────────────────────────────────
-describe("POST /api/events/:id/register", () => {
-  it("returns 400 when event is not published", async () => {
-    // eventId is now CANCELLED from above
-    const res = await request.post(`/api/events/${eventId}/register`).send({
-      volunteer_id: volunteerId ?? 1,
-    });
-    expect(res.status).toBe(400);
-  });
+    const err = await driver.wait(
+      until.elementLocated(By.className("a4a-submit-err")),
+      10000
+    );
+    expect(await err.getText()).toBe("Please fix the errors above.");
+  }, 30000);
 
-  it("returns 404 for a non-existent event", async () => {
-    const res = await request.post("/api/events/999999/register").send({
-      volunteer_id: 1,
-    });
-    expect(res.status).toBe(404);
-  });
-});
+  /**
+   * Business name field should show an inline error when left empty on submit
+   */
+  test("Empty business name shows inline error", async () => {
+    const submitBtn = await driver.wait(
+      until.elementLocated(By.xpath("//button[text()='Register Organization']")),
+      10000
+    );
+    await submitBtn.click();
 
-describe("GET /api/events/:id/registrations", () => {
-  it("returns an array of registrants", async () => {
-    const res = await request.get(`/api/events/${eventId}/registrations`);
-    expect(res.status).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
-  });
-});
+    // The bizErr state produces an error element near the biz name input
+    const errors = await driver.wait(
+      until.elementsLocated(By.className("a4a-err")),
+      10000
+    );
+    const texts = await Promise.all(errors.map((e) => e.getText()));
+    expect(texts.some((t) => t.includes("Business name is required."))).toBe(true);
+  }, 30000);
 
-describe("GET /api/events/:id/registrations/count", () => {
-  it("returns a numeric total", async () => {
-    const res = await request.get(`/api/events/${eventId}/registrations/count`);
-    expect(res.status).toBe(200);
-    expect(typeof res.body.total).toBe("number");
-  });
-});
+  /**
+   * Motto field should show an inline error when left empty on submit
+   */
+  test("Empty motto shows inline error", async () => {
+    const submitBtn = await driver.wait(
+      until.elementLocated(By.xpath("//button[text()='Register Organization']")),
+      10000
+    );
+    await submitBtn.click();
 
-describe("POST /api/events/:id/checkin", () => {
-  it("records a check-in for a volunteer", async () => {
-    const res = await request.post(`/api/events/${eventId}/checkin`).send({
-      volunteer_id: volunteerId ?? 1,
-      time_in: new Date().toISOString(),
-      time_out: null,
-    });
-    expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
-  });
-});
+    const errors = await driver.wait(
+      until.elementsLocated(By.className("a4a-err")),
+      10000
+    );
+    const texts = await Promise.all(errors.map((e) => e.getText()));
+    expect(texts.some((t) => t.includes("Motto / summary is required."))).toBe(true);
+  }, 30000);
 
-describe("DELETE /api/events/:id/register", () => {
-  it("returns 404 when registration doesn't exist", async () => {
-    const res = await request.delete(`/api/events/${eventId}/register`).send({
-      volunteer_id: 999999,
-    });
-    expect(res.status).toBe(404);
-  });
-});
+  /**
+   * A motto that is too short (< 10 chars) should show a length error
+   */
+  test("Short motto shows length error", async () => {
+    const textarea = await driver.wait(
+      until.elementLocated(By.css("textarea[placeholder^='We plant trees']")),
+      10000
+    );
+    await textarea.sendKeys("Hi");
 
-// ─── Event Roles ──────────────────────────────────────────────────────────────
-describe("POST /api/events/:id/roles", () => {
-  it("saves roles for an event", async () => {
-    const res = await request.post(`/api/events/${eventId}/roles`).send({
-      roles: [
-        { name: "Trail Cleaner", spots: 5 },
-        { name: "Team Lead", spots: 2 },
-      ],
-    });
-    expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
-  });
-});
+    const submitBtn = await driver.findElement(By.xpath("//button[text()='Register Organization']"));
+    await submitBtn.click();
 
-describe("GET /api/events/:id/roles", () => {
-  it("returns roles with spot counts", async () => {
-    const res = await request.get(`/api/events/${eventId}/roles`);
-    expect(res.status).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
-    if (res.body.length > 0) {
-      roleId = res.body[0].id;
-      expect(res.body[0]).toHaveProperty("name");
-      expect(res.body[0]).toHaveProperty("spots");
-      expect(res.body[0]).toHaveProperty("filled");
+    const errors = await driver.wait(
+      until.elementsLocated(By.className("a4a-err")),
+      10000
+    );
+    const texts = await Promise.all(errors.map((e) => e.getText()));
+    expect(texts.some((t) => t.includes("Please write at least 10 characters."))).toBe(true);
+  }, 30000);
+
+  /**
+   * Submitting without selecting a category should show a category error
+   */
+  test("No category selected shows category error", async () => {
+    const submitBtn = await driver.wait(
+      until.elementLocated(By.xpath("//button[text()='Register Organization']")),
+      10000
+    );
+    await submitBtn.click();
+
+    const errors = await driver.wait(
+      until.elementsLocated(By.className("a4a-err")),
+      10000
+    );
+    const texts = await Promise.all(errors.map((e) => e.getText()));
+    expect(texts.some((t) => t.includes("Please select a category."))).toBe(true);
+  }, 30000);
+
+  // ─── PHONE FORMATTING ────────────────────────────────────────────────────────
+
+  /**
+   * Typing digits into the phone field should auto-format them as (555) 000-0000
+   */
+  test("Phone field formats input correctly", async () => {
+    const phoneInput = await driver.wait(
+      until.elementLocated(By.css("input[placeholder='(555) 000-0000']")),
+      10000
+    );
+    await phoneInput.sendKeys("5550001234");
+
+    const val = await phoneInput.getAttribute("value");
+    expect(val).toBe("(555) 000-1234");
+  }, 30000);
+
+  /**
+   * An invalid phone number should show an inline error
+   */
+  test("Invalid phone number shows error", async () => {
+    const phoneInput = await driver.wait(
+      until.elementLocated(By.css("input[placeholder='(555) 000-0000']")),
+      10000
+    );
+    await phoneInput.sendKeys("123"); // too short
+
+    const submitBtn = await driver.findElement(By.xpath("//button[text()='Register Organization']"));
+    await submitBtn.click();
+
+    const errors = await driver.wait(
+      until.elementsLocated(By.className("a4a-err")),
+      10000
+    );
+    const texts = await Promise.all(errors.map((e) => e.getText()));
+    expect(texts.some((t) => t.length > 0)).toBe(true);
+  }, 30000);
+
+  // ─── ZIP CODE ────────────────────────────────────────────────────────────────
+
+  /**
+   * An invalid ZIP code should show an inline error
+   */
+  test("Invalid ZIP code shows error", async () => {
+    const zipInput = await driver.wait(
+      until.elementLocated(By.css("input[placeholder='90210']")),
+      10000
+    );
+    await zipInput.sendKeys("123"); // too short
+
+    // blur to trigger validation
+    await zipInput.sendKeys(Key.TAB);
+
+    const errors = await driver.wait(
+      until.elementsLocated(By.className("a4a-err")),
+      10000
+    );
+    const texts = await Promise.all(errors.map((e) => e.getText()));
+    expect(texts.some((t) => t.length > 0)).toBe(true);
+  }, 30000);
+
+  // ─── PASSWORD ────────────────────────────────────────────────────────────────
+
+  /**
+   * Typing a password should reveal the strength bar and label
+   */
+  test("Password strength bar appears when typing", async () => {
+    const passInput = await driver.wait(
+      until.elementLocated(By.css("input[placeholder='Create a password']")),
+      10000
+    );
+    await passInput.sendKeys("Test123!");
+
+    const strengthBar = await driver.wait(
+      until.elementLocated(By.className("a4a-strength-bar")),
+      10000
+    );
+    const strengthLabel = await driver.wait(
+      until.elementLocated(By.className("a4a-strength-label")),
+      10000
+    );
+
+    expect(await strengthBar.isDisplayed()).toBe(true);
+    expect(await strengthLabel.getText()).not.toBe("");
+  }, 30000);
+
+  /**
+   * Mismatched passwords should show a confirm error
+   */
+  test("Mismatched passwords show confirm error", async () => {
+    const passInput = await driver.wait(
+      until.elementLocated(By.css("input[placeholder='Create a password']")),
+      10000
+    );
+    await passInput.sendKeys("Password1!");
+
+    const confirmInput = await driver.wait(
+      until.elementLocated(By.css("input[placeholder='Repeat password']")),
+      10000
+    );
+    await confirmInput.sendKeys("DifferentPass1!");
+
+    const errors = await driver.wait(
+      until.elementsLocated(By.className("a4a-err")),
+      10000
+    );
+    const texts = await Promise.all(errors.map((e) => e.getText()));
+    expect(texts.some((t) => t.includes("Passwords do not match."))).toBe(true);
+  }, 30000);
+
+  /**
+   * Matching passwords should produce no confirm error
+   */
+  test("Matching passwords clears confirm error", async () => {
+    const passInput = await driver.wait(
+      until.elementLocated(By.css("input[placeholder='Create a password']")),
+      10000
+    );
+    await passInput.sendKeys("Password1!");
+
+    const confirmInput = await driver.wait(
+      until.elementLocated(By.css("input[placeholder='Repeat password']")),
+      10000
+    );
+    await confirmInput.sendKeys("Password1!");
+
+    // give React a tick to clear the error
+    await driver.sleep(300);
+
+    const errors = await driver.findElements(By.className("a4a-err"));
+    const texts = await Promise.all(errors.map((e) => e.getText()));
+    expect(texts.some((t) => t.includes("Passwords do not match."))).toBe(false);
+  }, 30000);
+
+  // ─── LOGO UPLOAD ─────────────────────────────────────────────────────────────
+
+  /**
+   * The "Upload Logo" button should be present and clickable
+   */
+  test("Upload Logo button is present", async () => {
+    const uploadBtn = await driver.wait(
+      until.elementLocated(By.xpath("//button[text()='Upload Logo']")),
+      10000
+    );
+    expect(await uploadBtn.isDisplayed()).toBe(true);
+  }, 30000);
+
+  // ─── CATEGORY DROPDOWN ───────────────────────────────────────────────────────
+
+  /**
+   * The category dropdown should contain at least the default placeholder option
+   */
+  test("Category dropdown renders placeholder option", async () => {
+    const select = await driver.wait(
+      until.elementLocated(By.css("select.a4a-input")),
+      10000
+    );
+    const defaultOption = await select.findElement(By.css("option[value='']"));
+    expect(await defaultOption.getText()).toBe("— Select a category —");
+  }, 30000);
+
+  /**
+   * Selecting a category should clear the category error
+   */
+  test("Selecting a category clears category error", async () => {
+    // First trigger the error
+    const submitBtn = await driver.wait(
+      until.elementLocated(By.xpath("//button[text()='Register Organization']")),
+      10000
+    );
+    await submitBtn.click();
+
+    // Now pick a category (assumes at least one exists from the API)
+    const select = await driver.findElement(By.css("select.a4a-input"));
+    const options = await select.findElements(By.css("option"));
+    if (options.length > 1) {
+      await options[1].click(); // pick the first real option
+      await driver.sleep(300);
+
+      const errors = await driver.findElements(By.className("a4a-field-err"));
+      const texts = await Promise.all(errors.map((e) => e.getText()));
+      expect(texts.some((t) => t.includes("Please select a category."))).toBe(false);
     }
-  });
+  }, 30000);
 });
 
-describe("POST /api/roles/:id/register", () => {
-  it("returns 404 for a non-existent role", async () => {
-    const res = await request.post("/api/roles/999999/register").send({
-      volunteer_id: volunteerId ?? 1,
-    });
-    expect(res.status).toBe(404);
-  });
-});
-
-describe("DELETE /api/roles/:id/register", () => {
-  it("returns 404 when role registration doesn't exist", async () => {
-    const res = await request.delete(`/api/roles/${roleId ?? 1}/register`).send({
-      volunteer_id: 999999,
-    });
-    expect(res.status).toBe(404);
-  });
-});
-
-describe("GET /api/roles/:id/volunteers", () => {
-  it("returns an array of volunteers for a role", async () => {
-    const res = await request.get(`/api/roles/${roleId ?? 1}/volunteers`);
-    expect(res.status).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
-  });
-});
-
-// ─── Event Tags & Badges ──────────────────────────────────────────────────────
-describe("POST /api/events/:id/tags", () => {
-  it("saves tags for an event", async () => {
-    const res = await request.post(`/api/events/${eventId}/tags`).send({
-      tags: ["Environment", "Community"],
-    });
-    expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
-  });
-});
-
-describe("GET /api/events/:id/tags", () => {
-  it("returns tags for an event", async () => {
-    const res = await request.get(`/api/events/${eventId}/tags`);
-    expect(res.status).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
-  });
-});
-
-describe("GET /api/badges", () => {
-  it("returns all badges", async () => {
-    const res = await request.get("/api/badges");
-    expect(res.status).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
-    if (res.body.length > 0) badgeId = res.body[0].id;
-  });
-});
-
-describe("POST /api/events/:id/badges", () => {
-  it("assigns badges to an event", async () => {
-    const res = await request.post(`/api/events/${eventId}/badges`).send({
-      badge_ids: badgeId ? [badgeId] : [],
-    });
-    expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
-  });
-});
-
-describe("GET /api/events/:id/badges", () => {
-  it("returns badges linked to an event", async () => {
-    const res = await request.get(`/api/events/${eventId}/badges`);
-    expect(res.status).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
-  });
-});
-
-// ─── Volunteer Routes ─────────────────────────────────────────────────────────
-describe("GET /api/volunteers/:id", () => {
-  it("returns volunteer profile for a valid user_id", async () => {
-    if (!volunteerUserId) return; // skip if login didn't run
-    const res = await request.get(`/api/volunteers/${volunteerUserId}`);
-    expect(res.status).toBe(200);
-    expect(res.body).toHaveProperty("full_name");
-    expect(res.body).toHaveProperty("email");
+describe("ColorWheelPicker", () => {
+  beforeEach(async () => {
+    await driver.get("http://localhost:5173");
+    const tab = await driver.wait(
+      until.elementLocated(By.xpath("//button[text()='Register Org']")),
+      10000
+    );
+    await tab.click();
+    // Scroll the color picker into view
+    const picker = await driver.wait(
+      until.elementLocated(By.className("a4a-color-picker-wrap")),
+      10000
+    );
+    await driver.executeScript("arguments[0].scrollIntoView({block: 'center'})", picker);
+    await driver.sleep(300);
   });
 
-  it("returns 404 for a non-existent volunteer", async () => {
-    const res = await request.get("/api/volunteers/999999");
-    expect(res.status).toBe(404);
-  });
-});
+  /**
+   * The color picker, hex input, and add button should all be present
+   */
+  test("ColorWheelPicker renders all elements", async () => {
+    const wheel = await driver.findElement(By.className("a4a-color-wheel"));
+    const hexInput = await driver.findElement(By.css("input[placeholder='#16a34a']"));
+    const addBtn = await driver.findElement(By.className("a4a-add-btn"));
 
-describe("GET /api/volunteers/:id/badges", () => {
-  it("returns badges for a volunteer", async () => {
-    const res = await request.get(`/api/volunteers/${volunteerId ?? 1}/badges`);
-    expect(res.status).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
-  });
-});
+    expect(await wheel.isDisplayed()).toBe(true);
+    expect(await hexInput.isDisplayed()).toBe(true);
+    expect(await addBtn.isDisplayed()).toBe(true);
+  }, 30000);
 
-describe("POST /api/volunteers/:id/badges", () => {
-  it("awards a badge to a volunteer", async () => {
-    if (!badgeId) return;
-    const res = await request.post(`/api/volunteers/${volunteerId ?? 1}/badges`).send({
-      badge_id: badgeId,
-    });
-    expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
-  });
-});
+  /**
+   * Typing a valid hex into the text input and clicking Add should add a color chip
+   */
+  test("Adding a valid hex color adds a chip", async () => {
+    const hexInput = await driver.findElement(By.css("input[placeholder='#16a34a']"));
+    await hexInput.sendKeys(Key.CONTROL + "a");
+    await hexInput.sendKeys(Key.DELETE);
+    await hexInput.sendKeys("#ff5733");
 
-describe("GET /api/volunteers/:id/registrations", () => {
-  it("returns registered events for a volunteer (by user_id)", async () => {
-    const res = await request.get(`/api/volunteers/${volunteerUserId ?? 1}/registrations`);
-    expect(res.status).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
-  });
-});
+    const addBtn = await driver.findElement(By.className("a4a-add-btn"));
+    await driver.executeScript("arguments[0].click()", addBtn);
 
-describe("GET /api/volunteers/:id/past-events", () => {
-  it("returns past events for a volunteer (by user_id)", async () => {
-    const res = await request.get(`/api/volunteers/${volunteerUserId ?? 1}/past-events`);
-    expect(res.status).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
-  });
-});
+    const chip = await driver.wait(
+      until.elementLocated(By.className("a4a-color-chip__hex")),
+      10000
+    );
+    expect(await chip.getText()).toBe("#ff5733");
+  }, 30000);
 
-describe("GET /api/volunteers/:id/service-hours", () => {
-  it("returns service hours for a volunteer (by user_id)", async () => {
-    const res = await request.get(`/api/volunteers/${volunteerUserId ?? 1}/service-hours`);
-    expect(res.status).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
-  });
-});
+  /**
+   * Typing an invalid hex and clicking Add should show an error
+   */
+  test("Adding an invalid hex shows error", async () => {
+    const hexInput = await driver.findElement(By.css("input[placeholder='#16a34a']"));
+    await hexInput.sendKeys(Key.CONTROL + "a");
+    await hexInput.sendKeys(Key.DELETE);
+    await hexInput.sendKeys("notahex");
 
-describe("GET /api/volunteers/zip_code", () => {
-  it("returns 400 when user_id is missing", async () => {
-    const res = await request.get("/api/volunteers/zip_code");
-    expect(res.status).toBe(400);
-  });
-});
+    const addBtn = await driver.findElement(By.className("a4a-add-btn"));
+    await driver.executeScript("arguments[0].click()", addBtn);
 
-describe("PUT /api/volunteers/profile", () => {
-  it("updates a volunteer profile", async () => {
-    const res = await request.put("/api/volunteers/profile").send({
-      user_id: volunteerUserId ?? 1,
-      firstName: "Jane",
-      lastName: "Updated",
-      zip_code: "14620",
-    });
-    expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
-  });
-});
+    const err = await driver.wait(
+      until.elementLocated(By.className("a4a-err")),
+      10000
+    );
+    expect(await err.getText()).toContain("Enter a valid hex");
+  }, 30000);
 
-// ─── Organization Routes ──────────────────────────────────────────────────────
-describe("GET /api/organizations/by-user/:userId", () => {
-  it("returns organization for a valid user", async () => {
-    if (!orgId) return;
-    const res = await request.get(`/api/organizations/by-user/${orgId}`);
-    // May be 200 or 404 depending on seeded data
-    expect([200, 404]).toContain(res.status);
-  });
-});
+  /**
+   * Adding the same color twice should show a duplicate error
+   */
+  test("Adding a duplicate color shows error", async () => {
+    const hexInput = await driver.findElement(By.css("input[placeholder='#16a34a']"));
+    const addBtn = await driver.findElement(By.className("a4a-add-btn"));
 
-describe("GET /api/organizations/:id", () => {
-  it("returns an organization by id", async () => {
-    if (!orgId) return;
-    const res = await request.get(`/api/organizations/${orgId}`);
-    expect(res.status).toBe(200);
-    expect(res.body).toHaveProperty("name");
-  });
+    await hexInput.sendKeys(Key.CONTROL + "a");
+    await hexInput.sendKeys(Key.DELETE);
+    await hexInput.sendKeys("#aabbcc");
+    await driver.executeScript("arguments[0].click()", addBtn);
 
-  it("returns 404 for a non-existent org", async () => {
-    const res = await request.get("/api/organizations/999999");
-    expect(res.status).toBe(404);
-  });
-});
+    await driver.sleep(300);
 
-describe("GET /api/organizations/:id/events", () => {
-  it("returns all events for an org", async () => {
-    if (!orgId) return;
-    const res = await request.get(`/api/organizations/${orgId}/events`);
-    expect(res.status).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
-  });
+    await hexInput.sendKeys(Key.CONTROL + "a");
+    await hexInput.sendKeys(Key.DELETE);
+    await hexInput.sendKeys("#aabbcc");
+    await driver.executeScript("arguments[0].click()", addBtn);
 
-  it("returns only published events when publishedOnly=true", async () => {
-    if (!orgId) return;
-    const res = await request.get(`/api/organizations/${orgId}/events`).query({ publishedOnly: "true" });
-    expect(res.status).toBe(200);
-    for (const ev of res.body) {
-      expect(ev.status).toBe("PUBLISHED");
+    const err = await driver.wait(
+      until.elementLocated(By.className("a4a-err")),
+      10000
+    );
+    expect(await err.getText()).toContain("Already added.");
+  }, 30000);
+
+  /**
+   * Adding 4 colors then attempting a 5th should show a max colors error
+   */
+  test("Adding more than 4 colors shows max error", async () => {
+    const colors = ["#ff0000", "#00ff00", "#0000ff", "#ffff00"];
+    const addBtn = await driver.findElement(By.className("a4a-add-btn"));
+
+    for (const color of colors) {
+      const hexInput = await driver.findElement(By.css("input[placeholder='#16a34a']"));
+      await hexInput.sendKeys(Key.CONTROL + "a");
+    await hexInput.sendKeys(Key.DELETE);
+      await hexInput.sendKeys(color);
+      await driver.executeScript("arguments[0].click()", addBtn);
+      await driver.sleep(200);
     }
-  });
-});
 
-describe("GET /api/organizations/:id/event-stats", () => {
-  it("returns event stats for an org", async () => {
-    if (!orgId) return;
-    const res = await request.get(`/api/organizations/${orgId}/event-stats`);
-    expect(res.status).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
-  });
-});
+    // Button is now disabled — use Enter key to bypass it and trigger the max branch
+    const hexInput = await driver.findElement(By.css("input[placeholder='#16a34a']"));
+    await hexInput.sendKeys(Key.CONTROL + "a");
+    await hexInput.sendKeys(Key.DELETE);
+    await hexInput.sendKeys("#123456");
+    await hexInput.sendKeys(Key.ENTER);
 
-describe("GET /api/organizations/zip_code", () => {
-  it("returns 400 when user_id is missing", async () => {
-    const res = await request.get("/api/organizations/zip_code");
-    expect(res.status).toBe(400);
-  });
-});
+    const err = await driver.wait(
+      until.elementLocated(By.className("a4a-err")),
+      10000
+    );
+    expect(await err.getText()).toContain("Maximum 4 colors.");
+  }, 30000);
 
-describe("PUT /api/organizations/profile", () => {
-  it("updates an organization profile", async () => {
-    const res = await request.put("/api/organizations/profile").send({
-      user_id: orgId ?? 1,
-      name: "Updated Org Name",
-      address: "789 Elm St",
-      zip_code: "14604",
-      motto: "Helping the community",
-      brand_colors: ["#15803d", "#1d4ed8"],
-    });
-    expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
-  });
-});
+  /**
+   * Pressing Enter in the hex input should trigger addColor
+   */
+  test("Pressing Enter in hex input adds a color", async () => {
+    const hexInput = await driver.findElement(By.css("input[placeholder='#16a34a']"));
+    await hexInput.sendKeys(Key.CONTROL + "a");
+    await hexInput.sendKeys(Key.DELETE);
+    await hexInput.sendKeys("#123abc");
+    await hexInput.sendKeys(Key.ENTER);
 
-// ─── Misc / Lookup Routes ─────────────────────────────────────────────────────
-describe("GET /api/orgCategories", () => {
-  it("returns an array of org categories", async () => {
-    const res = await request.get("/api/orgCategories");
-    expect(res.status).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
-  });
-});
+    const chip = await driver.wait(
+      until.elementLocated(By.className("a4a-color-chip__hex")),
+      10000
+    );
+    expect(await chip.getText()).toBe("#123abc");
+  }, 30000);
 
-describe("GET /api/eventCategories", () => {
-  it("returns an array of event categories", async () => {
-    const res = await request.get("/api/eventCategories");
-    expect(res.status).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
-  });
-});
+  /**
+   * Clicking the X button on a color chip should remove it
+   */
+  test("Removing a color chip removes it from the list", async () => {
+    const hexInput = await driver.findElement(By.css("input[placeholder='#16a34a']"));
+    const addBtn = await driver.findElement(By.className("a4a-add-btn"));
 
-describe("GET /api/full_name", () => {
-  it("returns name for a valid volunteer user_id", async () => {
-    if (!volunteerUserId) return;
-    const res = await request.get("/api/full_name").query({ user_id: volunteerUserId });
-    expect(res.status).toBe(200);
-    expect(res.body).toHaveProperty("name");
-  });
+    await hexInput.sendKeys(Key.CONTROL + "a");
+    await hexInput.sendKeys(Key.DELETE);
+    await hexInput.sendKeys("#ff5733");
+    await driver.executeScript("arguments[0].click()", addBtn);
 
-  it("returns 404 for unknown user_id", async () => {
-    const res = await request.get("/api/full_name").query({ user_id: 999999 });
-    expect(res.status).toBe(404);
-  });
-});
+    await driver.wait(until.elementLocated(By.className("a4a-color-chip")), 10000);
 
-describe("GET /api/phone", () => {
-  it("returns phone number for a valid user", async () => {
-    if (!volunteerUserId) return;
-    const res = await request.get("/api/phone").query({ user_id: volunteerUserId });
-    expect(res.status).toBe(200);
-    expect(res.body).toHaveProperty("phone");
-  });
+    const removeBtn = await driver.findElement(By.className("a4a-color-chip__remove"));
+    await driver.executeScript("arguments[0].click()", removeBtn);
 
-  it("returns 404 for unknown user", async () => {
-    const res = await request.get("/api/phone").query({ user_id: 999999 });
-    expect(res.status).toBe(404);
-  });
-});
+    await driver.sleep(300);
 
-describe("GET /api/events/:id/volunteer-role/:volunteerId", () => {
-  it("returns a role_id (or null) for a volunteer in an event", async () => {
-    const res = await request.get(`/api/events/${eventId}/volunteer-role/${volunteerId ?? 1}`);
-    expect(res.status).toBe(200);
-    expect(res.body).toHaveProperty("role_id");
-  });
-});
+    const chips = await driver.findElements(By.className("a4a-color-chip"));
+    expect(chips.length).toBe(0);
+  }, 30000);
 
-// ─── Cleanup ──────────────────────────────────────────────────────────────────
-describe("DELETE /api/events/:id", () => {
-  it("deletes an existing event", async () => {
-    const res = await request.delete(`/api/events/${eventId}`);
-    expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
-  });
+  /**
+   * The color count badge should update as colors are added
+   */
+  test("Color count updates as colors are added", async () => {
+    const addBtn = await driver.findElement(By.className("a4a-add-btn"));
 
-  it("returns 404 for a non-existent event", async () => {
-    const res = await request.delete("/api/events/999999");
-    expect(res.status).toBe(404);
-  });
+    const hexInput = await driver.findElement(By.css("input[placeholder='#16a34a']"));
+    await hexInput.sendKeys(Key.CONTROL + "a");
+    await hexInput.sendKeys(Key.DELETE);
+    await hexInput.sendKeys("#ff0000");
+    await driver.executeScript("arguments[0].click()", addBtn);
+
+    await driver.sleep(300);
+
+    const count = await driver.wait(
+      until.elementLocated(By.className("a4a-color-count")),
+      10000
+    );
+    expect(await count.getText()).toBe("1/4");
+  }, 30000);
+
+  /**
+   * Typing a valid hex into the text input should update the preview swatch
+   */
+  test("Valid hex input shows preview swatch", async () => {
+    const hexInput = await driver.findElement(By.css("input[placeholder='#16a34a']"));
+    await hexInput.sendKeys(Key.CONTROL + "a");
+    await hexInput.sendKeys(Key.DELETE);
+    await hexInput.sendKeys("#abc123");
+
+    const swatch = await driver.wait(
+      until.elementLocated(By.className("a4a-hex-preview")),
+      10000
+    );
+    expect(await swatch.isDisplayed()).toBe(true);
+  }, 30000);
 });

@@ -116,6 +116,7 @@ CREATE TABLE event_registrations (
 -- and potentially have a many to many table as well
 CREATE TABLE badges (
     id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     description TEXT NOT NULL,
     image_url TEXT -- URL to stored image
@@ -139,6 +140,13 @@ CREATE TABLE volunteer_badges (
     badge_id INTEGER NOT NULL REFERENCES badges(id) ON DELETE CASCADE,
     earned_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (volunteer_id, badge_id)
+);
+
+-- Represents the colors attached to an organizations account
+CREATE TABLE org_colors (
+    organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    color_id TEXT NOT NULL,
+    PRIMARY KEY (organization_id, color_id)
 );
 
 
