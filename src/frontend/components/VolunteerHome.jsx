@@ -449,6 +449,9 @@ function EventDetailModal({
         animation: "evFadeIn .2s ease",
       }}
       onClick={e => e.target === e.currentTarget && onClose()}
+      role="button"
+      tabIndex={0}
+      onKeyDown={e => (e.key === "Enter" || e.key === " ") && e.target === e.currentTarget && onClose()}
     >
       <style>{`
         @keyframes evFadeIn  { from { opacity:0 } to { opacity:1 } }
@@ -691,6 +694,10 @@ function EventDetailModal({
                       <div
                         key={i}
                         onClick={() => setCarouselIdx(i)}
+                        // Add to each dot div:
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={e => (e.key === "Enter" || e.key === " ") && setCarouselIdx(i)}
                         style={{
                           width: 6, height: 6, borderRadius: "50%", cursor: "pointer",
                           background: i === carouselIdx ? "#fff" : "rgba(255,255,255,.5)",
@@ -720,6 +727,9 @@ function EventDetailModal({
                         key={role.id}
                         className="ev-role-item"
                         onClick={() => !isFull && toggleRole(role.id)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={e => (e.key === "Enter" || e.key === " ") && !isFull && toggleRole(role.id)}
                         style={{
                           display: "flex", alignItems: "center", gap: 10,
                           padding: "10px 14px",
@@ -754,6 +764,9 @@ function EventDetailModal({
                 <div
                   className="ev-role-item"
                   onClick={() => setAttendee(p => !p)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={e => (e.key === "Enter" || e.key === " ") && setAttendee(p => !p)}
                   style={{
                     display: "flex", alignItems: "center", gap: 10,
                     padding: "10px 14px",
@@ -878,6 +891,9 @@ function MyEventsSlider({ events, onViewDetails, open, onToggle }) {
             <div
             key={ev.id}
             onClick={() => onViewDetails(ev)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={e => (e.key === "Enter" || e.key === " ") && onViewDetails(ev)}
             style={{
               minWidth: 200, background: "#f0fdf4", borderRadius: 12,
               padding: "12px 14px", cursor: "pointer",

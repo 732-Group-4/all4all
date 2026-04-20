@@ -770,6 +770,9 @@ function EventModal({ event, orgId, brandColors = [], onClose, onSaved }) {
         zIndex: 9999, padding: 16, backdropFilter: "blur(6px)",
       }}
       onClick={e => e.target === e.currentTarget && onClose()}
+      role="button"
+      tabIndex={0}
+      onKeyDown={e => (e.key === "Enter" || e.key === " ") && e.target === e.currentTarget && onClose()}
     >
       <div style={{
         background: "#fff", borderRadius: 22,
@@ -993,6 +996,10 @@ function EventModal({ event, orgId, brandColors = [], onClose, onSaved }) {
                 <label style={lbl}>Event Photos</label>
                 <div
                   onClick={() => photoInputRef.current.click()}
+                  // Add to the drop zone div:
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={e => (e.key === "Enter" || e.key === " ") && photoInputRef.current.click()}
                   onDragOver={e => e.preventDefault()}
                   onDrop={e => { e.preventDefault(); handlePhotoFiles(e.dataTransfer.files); }}
                   style={{
@@ -1032,9 +1039,11 @@ function EventModal({ event, orgId, brandColors = [], onClose, onSaved }) {
                         }}>✕</button>
                       </div>
                     ))}
+                    
                   </div>
                 )}
               </div>
+              
               <div>
               <label style={lbl}>Create a New Badge</label>
               <div style={{ display: "flex", flexDirection: "column", gap: 8, background: "#f8fafc", borderRadius: 10, padding: 12, border: "1.5px solid #e2e8f0" }}>
