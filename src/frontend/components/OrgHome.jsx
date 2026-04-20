@@ -93,6 +93,23 @@ function EventCard({ event, isOwnEvent, onEdit, onDelete }) {
   const [selectedBadgesPerVolunteer, setSelectedBadgesPerVolunteer] = useState({});
   const [badgesConfirmed, setBadgesConfirmed] = useState({});
 
+  // In EventCard, replace the badge state and useEffect:
+  const [earnedBadgesPerVolunteer, setEarnedBadgesPerVolunteer] = useState({});
+
+  // When registrants are loaded, also fetch their existing badges:
+  async function loadRegistrants() {
+    const data = await fetch(`/api/events/${event.id}/registrations`).then(r => r.json());
+    setRegistrants(data);
+    // Fetch earned badges for each volunteer
+    const earned = {};
+    await Promise.all(data.map(async r => {
+      const badges = await fetch(`/api/volunteers/${r.volunteer_id}/badges`).then(res => res.json());
+      earned[r.volunteer_id] = new Set(badges.map(b => b.name)); // use name since volunteer_badges joins by id
+    }));
+    setEarnedBadgesPerVolunteer(earned);
+  }
+
+
   useEffect(() => {
     fetch("/api/badges").then(r => r.json()).then(setAvailableBadges).catch(console.error);
   }, []);
@@ -265,10 +282,10 @@ function EventCard({ event, isOwnEvent, onEdit, onDelete }) {
       {isOwnEvent && !isDraft && (
         <>
           <button
+            // Then in the See Registrants button onClick:
             onClick={async () => {
               if (!showRegistrants && registrants.length === 0) {
-                const data = await fetch(`/api/events/${event.id}/registrations`).then(r => r.json());
-                setRegistrants(data);
+                await loadRegistrants();
               }
               setShowRegistrants(p => !p);
             }}
@@ -423,33 +440,33 @@ function EventCard({ event, isOwnEvent, onEdit, onDelete }) {
                         </div>
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                           {availableBadges.map(b => {
-                            const isSelected = (selectedBadgesPerVolunteer[r.volunteer_id] ?? new Set()).has(b.id);
-                            return (
-                              <button
-                                key={b.id}
-                                onClick={() => {
-                                  setSelectedBadgesPerVolunteer(prev => {
-                                    const current = new Set(prev[r.volunteer_id] ?? []);
-                                    isSelected ? current.delete(b.id) : current.add(b.id);
-                                    return { ...prev, [r.volunteer_id]: current };
-                                  });
-                                }}
-                                style={{
-                                  padding: "3px 10px", borderRadius: 99, fontSize: 11, fontWeight: 600,
-                                  border: `1.5px solid ${isSelected ? "#15803d" : "#e2e8f0"}`,
-                                  background: isSelected ? "#f0fdf4" : "#f8fafc",
-                                  color: isSelected ? "#15803d" : "#64748b",
-                                  cursor: "pointer", fontFamily: "inherit",
-                                }}
-                              >
-                                {b.image_url
-                                  ? <img src={b.image_url} alt={b.name} style={{ width: 12, height: 12, borderRadius: "50%", marginRight: 4, verticalAlign: "middle" }} />
-                                  : "🏅 "
-                                }
-                                {b.name}
-                              </button>
-                            );
-                          })}
+                          const isSelected = (selectedBadgesPerVolunteer[r.volunteer_id] ?? new Set()).has(b.id);
+                          const isEarned   = (earnedBadgesPerVolunteer[r.volunteer_id] ?? new Set()).has(b.name);
+                          return (
+                            <button
+                              key={b.id}
+                              onClick={() => {
+                                if (isEarned) return; // can't un-earn a badge
+                                setSelectedBadgesPerVolunteer(prev => {
+                                  const current = new Set(prev[r.volunteer_id] ?? []);
+                                  isSelected ? current.delete(b.id) : current.add(b.id);
+                                  return { ...prev, [r.volunteer_id]: current };
+                                });
+                              }}
+                              style={{
+                                padding: "3px 10px", borderRadius: 99, fontSize: 11, fontWeight: 600,
+                                border: `1.5px solid ${isEarned ? "#15803d" : isSelected ? "#2563eb" : "#e2e8f0"}`,
+                                background: isEarned ? "#f0fdf4" : isSelected ? "#eff6ff" : "#f8fafc",
+                                color: isEarned ? "#15803d" : isSelected ? "#1d4ed8" : "#64748b",
+                                cursor: isEarned ? "default" : "pointer", fontFamily: "inherit",
+                              }}
+                            >
+                              {isEarned ? "✓ " : ""}{b.image_url
+                                ? <img src={b.image_url} alt={b.name} style={{ width: 12, height: 12, borderRadius: "50%", marginRight: 4, verticalAlign: "middle" }} />
+                                : "🏅 "}{b.name}
+                            </button>
+                          );
+                        })}
                         </div>
 
                         {(selectedBadgesPerVolunteer[r.volunteer_id]?.size ?? 0) > 0 && (
@@ -465,6 +482,8 @@ function EventCard({ event, isOwnEvent, onEdit, onDelete }) {
                               }
                               setBadgesConfirmed(prev => ({ ...prev, [r.volunteer_id]: true }));
                               setSelectedBadgesPerVolunteer(prev => ({ ...prev, [r.volunteer_id]: new Set() }));
+                              // ✅ Refresh earned badges so pills stay highlighted
+                              await loadRegistrants();
                               setTimeout(() => setBadgesConfirmed(prev => ({ ...prev, [r.volunteer_id]: false })), 2000);
                             }}
                             style={{

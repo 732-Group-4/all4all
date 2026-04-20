@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import AvatarIcon from "./profile/AvatarIcon";
 import Field from "./shared/Field";
@@ -13,6 +13,310 @@ import {
 import { getPasswordStrength } from "../../backend/login_utils/passwordStrength";
 import "../styles/profile.css";
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function formatDate(iso) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+function fmtHours(h) {
+  const n = parseFloat(h) || 0;
+  return n > 0 ? n.toFixed(1) : "0";
+}
+
+// ─── Volunteer Service Hours Panel ───────────────────────────────────────────
+function VolunteerServicePanel({ userId }) {
+  const [rows, setRows]           = useState([]);
+  const [sortBy, setSortBy]       = useState("date");
+  const [filterOrg, setFilterOrg] = useState("All");
+  const [filterTag, setFilterTag] = useState("All");
+  const [fromDate, setFromDate]   = useState("");
+  const [toDate, setToDate]       = useState("");
+
+  useEffect(() => {
+    fetch(`/api/volunteers/${userId}/service-hours`)
+      .then(r => r.json())
+      .then(setRows)
+      .catch(console.error);
+  }, [userId]);
+
+  const orgs = useMemo(() => ["All", ...new Set(rows.map(r => r.organization_name))], [rows]);
+  const tags = useMemo(() => {
+    const all = rows.flatMap(r => r.tags ?? []);
+    return ["All", ...new Set(all)];
+  }, [rows]);
+
+  const filtered = useMemo(() => {
+    let r = rows;
+    if (filterOrg !== "All") r = r.filter(x => x.organization_name === filterOrg);
+    if (filterTag !== "All") r = r.filter(x => (x.tags ?? []).includes(filterTag));
+    if (fromDate) r = r.filter(x => new Date(x.start_time) >= new Date(fromDate));
+    if (toDate)   r = r.filter(x => new Date(x.start_time) <= new Date(toDate + "T23:59:59"));
+    if (sortBy === "date")  r = [...r].sort((a, b) => new Date(b.start_time) - new Date(a.start_time));
+    if (sortBy === "org")   r = [...r].sort((a, b) => a.organization_name.localeCompare(b.organization_name));
+    if (sortBy === "hours") r = [...r].sort((a, b) => b.hours - a.hours);
+    return r;
+  }, [rows, filterOrg, filterTag, fromDate, toDate, sortBy]);
+
+  const totalHours = filtered.reduce((s, r) => s + (parseFloat(r.hours) || 0), 0);
+
+  const sel = { padding: "6px 10px", borderRadius: 8, border: "1.5px solid #e2e8f0", fontSize: 12, fontFamily: "inherit", outline: "none", background: "#fff" };
+
+  return (
+    <div className="prof-section">
+      <div className="prof-section-title">⏱ Service Hours</div>
+
+      {/* Summary stat */}
+      <div style={{
+        background: "linear-gradient(135deg,#15803d,#166534)",
+        borderRadius: 14, padding: "16px 20px", color: "#fff",
+        display: "flex", alignItems: "center", gap: 16, marginBottom: 16,
+      }}>
+        <div>
+          <div style={{ fontSize: 36, fontWeight: 900, lineHeight: 1 }}>{fmtHours(totalHours)}</div>
+          <div style={{ fontSize: 11, fontWeight: 600, opacity: 0.8, letterSpacing: 0.5, textTransform: "uppercase" }}>
+            Total Hours{filterOrg !== "All" || filterTag !== "All" || fromDate || toDate ? " (filtered)" : ""}
+          </div>
+        </div>
+        <div style={{ marginLeft: "auto", fontSize: 13, opacity: 0.85 }}>
+          {filtered.filter(r => r.attended).length} events attended
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
+        <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={sel}>
+          <option value="date">Sort: Date</option>
+          <option value="org">Sort: Organization</option>
+          <option value="hours">Sort: Hours</option>
+        </select>
+        <select value={filterOrg} onChange={e => setFilterOrg(e.target.value)} style={sel}>
+          {orgs.map(o => <option key={o}>{o}</option>)}
+        </select>
+        <select value={filterTag} onChange={e => setFilterTag(e.target.value)} style={sel}>
+          {tags.map(t => <option key={t}>{t}</option>)}
+        </select>
+        <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} style={sel} />
+        <input type="date" value={toDate}   onChange={e => setToDate(e.target.value)}   style={sel} />
+        {(filterOrg !== "All" || filterTag !== "All" || fromDate || toDate) && (
+          <button onClick={() => { setFilterOrg("All"); setFilterTag("All"); setFromDate(""); setToDate(""); }}
+            style={{ ...sel, background: "#fef2f2", color: "#ef4444", border: "1.5px solid #fecaca", cursor: "pointer" }}>
+            Clear
+          </button>
+        )}
+      </div>
+
+      {/* Rows */}
+      {filtered.length === 0 ? (
+        <p style={{ fontSize: 13, color: "#94a3b8", textAlign: "center", padding: "24px 0" }}>No service hours recorded yet.</p>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {filtered.map(r => (
+            <div key={r.event_id} style={{
+              background: r.attended ? "#f0fdf4" : "#f8fafc",
+              borderRadius: 10, padding: "10px 14px",
+              border: `1px solid ${r.attended ? "#bbf7d0" : "#e2e8f0"}`,
+              display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8,
+            }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>{r.event_name}</div>
+                <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 2 }}>
+                  {r.organization_name} · {formatDate(r.start_time)}
+                </div>
+                {(r.tags ?? []).length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 4 }}>
+                    {r.tags.map(t => (
+                      <span key={t} style={{
+                        background: "#f0fdf4", color: "#15803d", fontSize: 10, fontWeight: 600,
+                        padding: "1px 7px", borderRadius: 99, border: "1px solid #bbf7d0",
+                      }}>{t}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div style={{ textAlign: "right", flexShrink: 0 }}>
+                <div style={{ fontSize: 18, fontWeight: 800, color: r.attended ? "#15803d" : "#94a3b8" }}>
+                  {fmtHours(r.hours)}h
+                </div>
+                <div style={{ fontSize: 10, color: "#94a3b8" }}>
+                  {r.attended ? "attended" : "registered"}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Org Events + Service Panel ───────────────────────────────────────────────
+function OrgServicePanel({ orgId }) {
+  const [rows, setRows]         = useState([]);
+  const [sortBy, setSortBy]     = useState("date");
+  const [filterTag, setFilterTag] = useState("All");
+  const [filterStatus, setFilterStatus] = useState("All");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate]     = useState("");
+  const [metric, setMetric]     = useState("hours"); // "hours" | "volunteers"
+
+  useEffect(() => {
+    fetch(`/api/organizations/${orgId}/event-stats`)
+      .then(r => r.json())
+      .then(setRows)
+      .catch(console.error);
+  }, [orgId]);
+
+  const tags = useMemo(() => {
+    const all = rows.flatMap(r => r.tags ?? []);
+    return ["All", ...new Set(all)];
+  }, [rows]);
+
+  const filtered = useMemo(() => {
+    let r = rows;
+    if (filterTag !== "All")    r = r.filter(x => (x.tags ?? []).includes(filterTag));
+    if (filterStatus !== "All") r = r.filter(x => x.status === filterStatus);
+    if (fromDate) r = r.filter(x => new Date(x.start_time) >= new Date(fromDate));
+    if (toDate)   r = r.filter(x => new Date(x.start_time) <= new Date(toDate + "T23:59:59"));
+    if (sortBy === "date")       r = [...r].sort((a, b) => new Date(b.start_time) - new Date(a.start_time));
+    if (sortBy === "hours")      r = [...r].sort((a, b) => b.total_hours - a.total_hours);
+    if (sortBy === "volunteers") r = [...r].sort((a, b) => b.volunteer_count - a.volunteer_count);
+    return r;
+  }, [rows, filterTag, filterStatus, fromDate, toDate, sortBy]);
+
+  const totalHours      = filtered.reduce((s, r) => s + (parseFloat(r.total_hours) || 0), 0);
+  const totalVolunteers = filtered.reduce((s, r) => s + (parseInt(r.volunteer_count) || 0), 0);
+
+  const sel = { padding: "6px 10px", borderRadius: 8, border: "1.5px solid #e2e8f0", fontSize: 12, fontFamily: "inherit", outline: "none", background: "#fff" };
+
+  return (
+    <div className="prof-section">
+      <div className="prof-section-title">📊 Event Activity</div>
+
+      {/* Summary stats */}
+      <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+        {[
+          { label: "Total Hours", value: fmtHours(totalHours), color: "#15803d", key: "hours" },
+          { label: "Total Volunteers", value: totalVolunteers, color: "#2563eb", key: "volunteers" },
+          { label: "Events", value: filtered.length, color: "#7c3aed", key: null },
+        ].map(s => (
+          <div
+            key={s.label}
+            onClick={() => s.key && setMetric(s.key)}
+            style={{
+              background: `linear-gradient(135deg,${s.color},${s.color}cc)`,
+              borderRadius: 14, padding: "14px 18px", color: "#fff",
+              display: "flex", flexDirection: "column", flex: 1, minWidth: 100,
+              cursor: s.key ? "pointer" : "default",
+              boxShadow: metric === s.key ? `0 4px 16px ${s.color}66` : "none",
+              outline: metric === s.key ? `2px solid ${s.color}` : "none",
+              outlineOffset: 2,
+            }}
+          >
+            <span style={{ fontSize: 28, fontWeight: 900, lineHeight: 1 }}>{s.value}</span>
+            <span style={{ fontSize: 10, fontWeight: 600, opacity: 0.85, marginTop: 4, textTransform: "uppercase", letterSpacing: 0.5 }}>
+              {s.label}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* Filters */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
+        <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={sel}>
+          <option value="date">Sort: Date</option>
+          <option value="hours">Sort: Hours</option>
+          <option value="volunteers">Sort: Volunteers</option>
+        </select>
+        <select value={filterTag} onChange={e => setFilterTag(e.target.value)} style={sel}>
+          {tags.map(t => <option key={t}>{t}</option>)}
+        </select>
+        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={sel}>
+          <option value="All">All Statuses</option>
+          <option value="PUBLISHED">Published</option>
+          <option value="DRAFT">Draft</option>
+          <option value="COMPLETED">Completed</option>
+          <option value="CANCELLED">Cancelled</option>
+        </select>
+        <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} style={sel} />
+        <input type="date" value={toDate}   onChange={e => setToDate(e.target.value)}   style={sel} />
+        {(filterTag !== "All" || filterStatus !== "All" || fromDate || toDate) && (
+          <button onClick={() => { setFilterTag("All"); setFilterStatus("All"); setFromDate(""); setToDate(""); }}
+            style={{ ...sel, background: "#fef2f2", color: "#ef4444", border: "1.5px solid #fecaca", cursor: "pointer" }}>
+            Clear
+          </button>
+        )}
+      </div>
+
+      {/* Event rows */}
+      {filtered.length === 0 ? (
+        <p style={{ fontSize: 13, color: "#94a3b8", textAlign: "center", padding: "24px 0" }}>No events yet.</p>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {filtered.map(r => {
+            const isPast = new Date(r.end_time) < new Date();
+            return (
+              <div key={r.id} style={{
+                background: "#f8fafc", borderRadius: 10, padding: "12px 14px",
+                border: "1px solid #e2e8f0",
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>{r.name}</span>
+                      <span style={{
+                        fontSize: 10, fontWeight: 700, padding: "1px 7px", borderRadius: 99,
+                        background: r.status === "PUBLISHED" ? "#eff6ff" : r.status === "DRAFT" ? "#fef9c3" : "#f0fdf4",
+                        color: r.status === "PUBLISHED" ? "#1d4ed8" : r.status === "DRAFT" ? "#854d0e" : "#15803d",
+                        border: `1px solid ${r.status === "PUBLISHED" ? "#bfdbfe" : r.status === "DRAFT" ? "#fde68a" : "#bbf7d0"}`,
+                      }}>
+                        {r.status}
+                      </span>
+                      {isPast && r.status !== "CANCELLED" && (
+                        <span style={{ fontSize: 10, fontWeight: 700, padding: "1px 7px", borderRadius: 99, background: "#f0fdf4", color: "#15803d", border: "1px solid #bbf7d0" }}>
+                          Completed
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: "#64748b" }}>
+                      📅 {formatDate(r.start_time)}
+                    </div>
+                    {(r.tags ?? []).length > 0 && (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 4 }}>
+                        {r.tags.map(t => (
+                          <span key={t} style={{
+                            background: "#f0fdf4", color: "#15803d", fontSize: 10, fontWeight: 600,
+                            padding: "1px 7px", borderRadius: 99, border: "1px solid #bbf7d0",
+                          }}>{t}</span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Metric display */}
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    {metric === "hours" ? (
+                      <>
+                        <div style={{ fontSize: 20, fontWeight: 800, color: "#15803d" }}>{fmtHours(r.total_hours)}h</div>
+                        <div style={{ fontSize: 10, color: "#94a3b8" }}>service hours</div>
+                      </>
+                    ) : (
+                      <>
+                        <div style={{ fontSize: 20, fontWeight: 800, color: "#2563eb" }}>{r.volunteer_count}</div>
+                        <div style={{ fontSize: 10, color: "#94a3b8" }}>volunteers</div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
 export default function ProfilePage() {
   const navigate = useNavigate();
 
@@ -38,13 +342,16 @@ export default function ProfilePage() {
   const fileRef = useRef(null);
   const [displayName, setDisplayName] = useState("");
 
+  // Volunteer-specific
   const [registeredEvents, setRegisteredEvents] = useState([]);
   const [pastEvents, setPastEvents]             = useState([]);
   const [volunteerBadges, setVolunteerBadges]   = useState([]);
 
+  // Org-specific
+  const [org, setOrg] = useState(null);
+
   const str = getPasswordStrength(newPass);
 
-  // ── All data fetching in one useEffect ──
   useEffect(() => {
     if (!user?.id) return;
 
@@ -58,8 +365,7 @@ export default function ProfilePage() {
         } else {
           setForm(f => ({ ...f, name: data.name }));
         }
-      })
-      .catch(console.error);
+      }).catch(console.error);
 
     fetch(`/api/phone?user_id=${user.id}`)
       .then(r => r.json())
@@ -75,6 +381,11 @@ export default function ProfilePage() {
       .catch(console.error);
 
     if (!isVolunteer) {
+      fetch(`/api/organizations/by-user/${user.id}`)
+        .then(r => r.json())
+        .then(setOrg)
+        .catch(console.error);
+
       fetch(`/api/organizations/address?user_id=${user.id}`)
         .then(r => r.json())
         .then(data => setForm(f => ({ ...f, address: data.address })))
@@ -93,14 +404,10 @@ export default function ProfilePage() {
 
     if (isVolunteer) {
       fetch(`/api/volunteers/${user.id}/registrations`)
-        .then(r => r.json())
-        .then(setRegisteredEvents)
-        .catch(console.error);
+        .then(r => r.json()).then(setRegisteredEvents).catch(console.error);
 
       fetch(`/api/volunteers/${user.id}/past-events`)
-        .then(r => r.json())
-        .then(setPastEvents)
-        .catch(console.error);
+        .then(r => r.json()).then(setPastEvents).catch(console.error);
 
       fetch(`/api/volunteers/${user.id}`)
         .then(r => r.json())
@@ -110,7 +417,6 @@ export default function ProfilePage() {
     }
   }, []);
 
-  // ── Field helpers ──
   function set(key, value) {
     setForm(f => ({ ...f, [key]: value }));
     setErrors(e => ({ ...e, [key]: null }));
@@ -126,12 +432,11 @@ export default function ProfilePage() {
       const MAX = 100;
       const scale = Math.min(MAX / img.width, MAX / img.height, 1);
       const canvas = document.createElement("canvas");
-      canvas.width  = img.width  * scale;
+      canvas.width = img.width * scale;
       canvas.height = img.height * scale;
       canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
-      const compressed = canvas.toDataURL("image/jpeg", 0.6);
+      set("avatar", canvas.toDataURL("image/jpeg", 0.6));
       URL.revokeObjectURL(url);
-      set("avatar", compressed);
     };
     img.src = url;
   }
@@ -146,7 +451,6 @@ export default function ProfilePage() {
     setConfirmErr(newPass !== e.target.value ? "Passwords do not match." : null);
   }
 
-  // ── Validation ──
   function validate() {
     const errs = {};
     const uErr = validateUsernameFormat(form.username);
@@ -170,52 +474,31 @@ export default function ProfilePage() {
     return errs;
   }
 
-  // ── Save ──
   async function handleSave() {
     const errs = validate();
     if (Object.keys(errs).length) { setErrors(errs); return; }
-
     const updated = { ...form };
     if (newPass) updated.password = newPass;
     if (updated.avatar) {
       localStorage.setItem("userAvatar", updated.avatar);
       delete updated.avatar;
     }
-
     try {
       if (isVolunteer) {
         await fetch("/api/volunteers/profile", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            user_id: user.id,
-            firstName: form.firstName,
-            lastName: form.lastName,
-            zip_code: form.zip_code,
-          }),
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_id: user.id, firstName: form.firstName, lastName: form.lastName, zip_code: form.zip_code }),
         });
       } else {
         await fetch("/api/organizations/profile", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            user_id: user.id,
-            name: form.name,
-            address: form.address,
-            zip_code: form.zip_code,
-            motto: form.motto,
-            brand_colors: form.colors || [],
-          }),
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_id: user.id, name: form.name, address: form.address, zip_code: form.zip_code, motto: form.motto, brand_colors: form.colors || [] }),
         });
       }
-    } catch (err) {
-      console.error("Failed to save profile:", err);
-    }
-
+    } catch (err) { console.error("Failed to save profile:", err); }
     localStorage.setItem("user", JSON.stringify(updated));
     setUser(updated);
-    setNewPass("");
-    setConfirmPass("");
+    setNewPass(""); setConfirmPass("");
     setErrors({});
     setEditing(false);
     setSaved(true);
@@ -229,53 +512,49 @@ export default function ProfilePage() {
     setEditing(false);
   }
 
-  // ── Reusable settings panel fields ──
+  // ── Inner field components (defined inside so they share state) ──
   function VolunteerFields() {
     return (
       <>
         <div className="prof-section-title" style={{ marginBottom: 12 }}>Personal Information</div>
         <div className="prof-row">
           <Field label="First Name" error={errors.firstName}>
-            {editing
-              ? <TextInput value={form.firstName || ""} onChange={e => set("firstName", e.target.value)} error={errors.firstName} placeholder="Jane" />
-              : <div className="prof-value">{form.firstName}</div>}
+            {editing ? <TextInput value={form.firstName || ""} onChange={e => set("firstName", e.target.value)} error={errors.firstName} placeholder="Jane" />
+                     : <div className="prof-value">{form.firstName}</div>}
           </Field>
           <Field label="Last Name" error={errors.lastName}>
-            {editing
-              ? <TextInput value={form.lastName || ""} onChange={e => set("lastName", e.target.value)} error={errors.lastName} placeholder="Doe" />
-              : <div className="prof-value">{form.lastName}</div>}
+            {editing ? <TextInput value={form.lastName || ""} onChange={e => set("lastName", e.target.value)} error={errors.lastName} placeholder="Doe" />
+                     : <div className="prof-value">{form.lastName}</div>}
           </Field>
         </div>
         <Field label="Username" error={errors.username}>
-          {editing
-            ? <TextInput value={form.username || ""} onChange={e => set("username", e.target.value)} error={errors.username} placeholder="jane_doe42" />
-            : <div className="prof-value">@{user.username}</div>}
+          {editing ? <TextInput value={form.username || ""} onChange={e => set("username", e.target.value)} error={errors.username} placeholder="jane_doe42" />
+                   : <div className="prof-value">@{user.username}</div>}
         </Field>
         <Field label="Email" hint="Contact support to change your email.">
           <div className="prof-value prof-value--locked">{user.email}</div>
         </Field>
         <div className="prof-row">
           <Field label="Phone" error={errors.phone}>
-            {editing
-              ? <TextInput value={form.phone || ""} onChange={handlePhone} error={errors.phone} placeholder="(555) 123-4567" />
-              : <div className="prof-value">{form.phone || <span className="prof-value--muted">Not set</span>}</div>}
+            {editing ? <TextInput value={form.phone || ""} onChange={handlePhone} error={errors.phone} placeholder="(555) 123-4567" />
+                     : <div className="prof-value">{form.phone || <span className="prof-value--muted">Not set</span>}</div>}
           </Field>
           <Field label="ZIP Code" error={errors.zip_code}>
-            {editing
-              ? <TextInput value={form.zip_code || ""} onChange={e => set("zip_code", e.target.value)} error={errors.zip_code} placeholder="90210" />
-              : <div className="prof-value">{form.zip_code || <span className="prof-value--muted">Not set</span>}</div>}
+            {editing ? <TextInput value={form.zip_code || ""} onChange={e => set("zip_code", e.target.value)} error={errors.zip_code} placeholder="90210" />
+                     : <div className="prof-value">{form.zip_code || <span className="prof-value--muted">Not set</span>}</div>}
           </Field>
         </div>
-        {editing && isVolunteer && (
-          <>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
-              <AvatarIcon avatarSrc={form.avatar} size={52} />
-              <button className="prof-avatar-edit-btn" onClick={() => fileRef.current.click()} title="Change photo">
-                Change Photo
-              </button>
-              <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleAvatarFile} />
-            </div>
-          </>
+        {editing && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
+            <AvatarIcon avatarSrc={form.avatar} size={48} />
+            <button
+              style={{ padding: "6px 14px", borderRadius: 8, border: "1.5px solid #e2e8f0", background: "#f8fafc", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}
+              onClick={() => fileRef.current.click()}
+            >
+              Change Photo
+            </button>
+            <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleAvatarFile} />
+          </div>
         )}
       </>
     );
@@ -286,34 +565,29 @@ export default function ProfilePage() {
       <>
         <div className="prof-section-title" style={{ marginBottom: 12 }}>Organization Information</div>
         <Field label="Organization Name" error={errors.name}>
-          {editing
-            ? <TextInput value={form.name || ""} onChange={e => set("name", e.target.value)} error={errors.name} placeholder="Green Earth Foundation" />
-            : <div className="prof-value">{form.name}</div>}
+          {editing ? <TextInput value={form.name || ""} onChange={e => set("name", e.target.value)} error={errors.name} placeholder="Green Earth Foundation" />
+                   : <div className="prof-value">{form.name}</div>}
         </Field>
         <Field label="Username" error={errors.username}>
-          {editing
-            ? <TextInput value={form.username || ""} onChange={e => set("username", e.target.value)} error={errors.username} placeholder="green_earth_org" />
-            : <div className="prof-value">@{user.username}</div>}
+          {editing ? <TextInput value={form.username || ""} onChange={e => set("username", e.target.value)} error={errors.username} placeholder="green_earth_org" />
+                   : <div className="prof-value">@{user.username}</div>}
         </Field>
         <Field label="Email" hint="Contact support to change your email.">
           <div className="prof-value prof-value--locked">{user.email}</div>
         </Field>
         <div className="prof-row">
           <Field label="Phone" error={errors.phone}>
-            {editing
-              ? <TextInput value={form.phone || ""} onChange={handlePhone} error={errors.phone} placeholder="(555) 000-0000" />
-              : <div className="prof-value">{form.phone || <span className="prof-value--muted">Not set</span>}</div>}
+            {editing ? <TextInput value={form.phone || ""} onChange={handlePhone} error={errors.phone} placeholder="(555) 000-0000" />
+                     : <div className="prof-value">{form.phone || <span className="prof-value--muted">Not set</span>}</div>}
           </Field>
           <Field label="ZIP Code" error={errors.zip_code}>
-            {editing
-              ? <TextInput value={form.zip_code || ""} onChange={e => set("zip_code", e.target.value)} error={errors.zip_code} placeholder="90210" />
-              : <div className="prof-value">{form.zip_code || <span className="prof-value--muted">Not set</span>}</div>}
+            {editing ? <TextInput value={form.zip_code || ""} onChange={e => set("zip_code", e.target.value)} error={errors.zip_code} placeholder="90210" />
+                     : <div className="prof-value">{form.zip_code || <span className="prof-value--muted">Not set</span>}</div>}
           </Field>
         </div>
         <Field label="Address" error={null}>
-          {editing
-            ? <TextInput value={form.address || ""} onChange={e => set("address", e.target.value)} placeholder="123 Main St" />
-            : <div className="prof-value">{form.address || <span className="prof-value--muted">Not set</span>}</div>}
+          {editing ? <TextInput value={form.address || ""} onChange={e => set("address", e.target.value)} placeholder="123 Main St" />
+                   : <div className="prof-value">{form.address || <span className="prof-value--muted">Not set</span>}</div>}
         </Field>
         <Field label="Motto / About" error={errors.motto}>
           {editing
@@ -341,7 +615,7 @@ export default function ProfilePage() {
     );
   }
 
-  function PasswordFields() {
+  function PasswordSection() {
     return (
       <div className="prof-section" style={{ marginTop: 16 }}>
         <div className="prof-section-title">Change Password</div>
@@ -379,11 +653,11 @@ export default function ProfilePage() {
     );
   }
 
-  // ── Render ──
+  // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <div className="prof-page">
 
-      {/* ── Nav bar (single) ── */}
+      {/* Nav */}
       <nav className="prof-nav">
         <button className="prof-nav__logo" onClick={() => navigate(isVolunteer ? "/home" : "/org-home")}>
           <img src={logo} alt="All4All logo" style={{ height: 32, width: "auto" }} />
@@ -398,7 +672,7 @@ export default function ProfilePage() {
 
       <div className="prof-content">
 
-        {/* ── Header card ── */}
+        {/* Header card */}
         <div className="prof-header-card">
           <div className="prof-avatar-wrap">
             <AvatarIcon avatarSrc={form.avatar} size={88} />
@@ -411,17 +685,18 @@ export default function ProfilePage() {
             </span>
           </div>
           <div className="prof-header-actions">
-            <button className="prof-btn" onClick={() => setShowSettings(true)}>
-              Edit Profile
-            </button>
+            <button className="prof-btn" onClick={() => setShowSettings(true)}>Edit Profile</button>
           </div>
         </div>
 
         {saved && <div className="prof-toast">Profile updated successfully.</div>}
 
-        {/* ── Volunteer activity sections ── */}
+        {/* ── VOLUNTEER content ── */}
         {isVolunteer && (
           <>
+            {/* Service hours */}
+            <VolunteerServicePanel userId={user.id} />
+
             {/* Registered Events */}
             {registeredEvents.length > 0 && (
               <div className="prof-section">
@@ -436,7 +711,7 @@ export default function ProfilePage() {
                       <div>
                         <div style={{ fontSize: 13, fontWeight: 700, color: "#15803d" }}>{ev.name}</div>
                         <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 2 }}>
-                          📅 {new Date(ev.start_time).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                          📅 {formatDate(ev.start_time)}
                           {ev.city && ` · 📍 ${ev.city}, ${ev.state}`}
                         </div>
                       </div>
@@ -464,20 +739,12 @@ export default function ProfilePage() {
                       <div>
                         <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>{ev.name}</div>
                         <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 2 }}>
-                          📅 {new Date(ev.start_time).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                          📅 {formatDate(ev.start_time)}
                         </div>
                       </div>
-                      {ev.attended ? (
-                        <span style={{
-                          background: "#f0fdf4", color: "#15803d", fontSize: 10, fontWeight: 700,
-                          padding: "2px 9px", borderRadius: 99, border: "1px solid #bbf7d0",
-                        }}>✓ Attended</span>
-                      ) : (
-                        <span style={{
-                          background: "#fef9c3", color: "#854d0e", fontSize: 10, fontWeight: 700,
-                          padding: "2px 9px", borderRadius: 99, border: "1px solid #fde68a",
-                        }}>Not Attended</span>
-                      )}
+                      {ev.attended
+                        ? <span style={{ background: "#f0fdf4", color: "#15803d", fontSize: 10, fontWeight: 700, padding: "2px 9px", borderRadius: 99, border: "1px solid #bbf7d0" }}>✓ Attended</span>
+                        : <span style={{ background: "#fef9c3", color: "#854d0e", fontSize: 10, fontWeight: 700, padding: "2px 9px", borderRadius: 99, border: "1px solid #fde68a" }}>Not Attended</span>}
                     </div>
                   ))}
                 </div>
@@ -508,7 +775,6 @@ export default function ProfilePage() {
               </div>
             )}
 
-            {/* Empty state */}
             {registeredEvents.length === 0 && pastEvents.length === 0 && volunteerBadges.length === 0 && (
               <div className="prof-section" style={{ textAlign: "center", color: "#94a3b8", padding: "48px 24px" }}>
                 <div style={{ fontSize: 40, marginBottom: 12 }}>🌱</div>
@@ -519,40 +785,20 @@ export default function ProfilePage() {
           </>
         )}
 
-        {/* ── Org: show description / colors as a summary ── */}
-        {!isVolunteer && (
-          <div className="prof-section">
-            <div className="prof-section-title">Organization Summary</div>
-            {form.motto && (
-              <p style={{ fontSize: 14, color: "#475569", lineHeight: 1.7, borderLeft: "3px solid #15803d", paddingLeft: 14 }}>
-                {form.motto}
-              </p>
-            )}
-            {form.colors?.length > 0 && (
-              <div className="prof-colors-row" style={{ marginTop: 12 }}>
-                {form.colors.map(c => (
-                  <div key={c} className="prof-color-chip">
-                    <span className="prof-color-chip__swatch" style={{ background: c }} />
-                    <span className="prof-color-chip__hex">{c}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+        {/* ── ORG content ── */}
+        {!isVolunteer && org && (
+          <OrgServicePanel orgId={org.id} />
         )}
 
       </div>
 
-      {/* ── Settings slide-over ── */}
+      {/* Settings slide-over */}
       {showSettings && (
         <div style={{ position: "fixed", inset: 0, zIndex: 1000, display: "flex", justifyContent: "flex-end" }}>
-          {/* Backdrop */}
           <div
             style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.4)", backdropFilter: "blur(4px)" }}
             onClick={() => { setShowSettings(false); setEditing(false); }}
           />
-
-          {/* Panel */}
           <div style={{
             position: "relative", zIndex: 1,
             width: "100%", maxWidth: 480,
@@ -561,7 +807,6 @@ export default function ProfilePage() {
             boxShadow: "-8px 0 40px rgba(0,0,0,0.15)",
             display: "flex", flexDirection: "column",
           }}>
-            {/* Panel header */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24, flexShrink: 0 }}>
               <h2 style={{ fontSize: 18, fontWeight: 800, color: "#1e293b" }}>Account Settings</h2>
               <button
@@ -574,44 +819,25 @@ export default function ProfilePage() {
               >✕</button>
             </div>
 
-            {/* Fields */}
             <div style={{ flex: 1 }}>
               {isVolunteer ? <VolunteerFields /> : <OrgFields />}
-              {editing && <PasswordFields />}
+              {editing && <PasswordSection />}
             </div>
 
-            {/* Action buttons */}
             <div style={{ paddingTop: 20, display: "flex", gap: 10, flexShrink: 0 }}>
-              {!editing ? (
-                <button className="prof-btn" style={{ flex: 1 }} onClick={() => setEditing(true)}>
-                  Edit Profile
-                </button>
-              ) : (
-                <>
-                  <button
-                    className="prof-btn"
-                    style={{ flex: 2 }}
-                    onClick={async () => { await handleSave(); setShowSettings(false); }}
-                  >
-                    Save Changes
-                  </button>
-                  <button className="prof-btn prof-btn--ghost" style={{ flex: 1 }} onClick={handleCancel}>
-                    Cancel
-                  </button>
-                </>
-              )}
+              {!editing
+                ? <button className="prof-btn" style={{ flex: 1 }} onClick={() => setEditing(true)}>Edit Profile</button>
+                : <>
+                    <button className="prof-btn" style={{ flex: 2 }} onClick={async () => { await handleSave(); setShowSettings(false); }}>Save Changes</button>
+                    <button className="prof-btn prof-btn--ghost" style={{ flex: 1 }} onClick={handleCancel}>Cancel</button>
+                  </>}
             </div>
 
-            {/* Log out */}
             <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid #f1f5f9", flexShrink: 0 }}>
               <button
                 className="prof-btn prof-btn--danger"
                 style={{ width: "100%" }}
-                onClick={() => {
-                  localStorage.removeItem("token");
-                  localStorage.removeItem("user");
-                  navigate("/");
-                }}
+                onClick={() => { localStorage.removeItem("token"); localStorage.removeItem("user"); navigate("/"); }}
               >
                 Log Out
               </button>

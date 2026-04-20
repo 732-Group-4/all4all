@@ -75,7 +75,7 @@ export default function OrgForm({ onSwitch }) {
     function handlePassword(e) {
         setPassword(e.target.value);
         setPassErr(validatePassword(e.target.value));
-        if (confirmErr !== null) { // ✅ was if(confirm)
+        if (confirmErr !== null) { 
             setConfirmErr(e.target.value !== confirm ? "Passwords do not match." : null);
         }
     }
