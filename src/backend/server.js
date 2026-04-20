@@ -24,6 +24,96 @@ const profileStorage = multer.diskStorage({
 });
 const profileUpload = multer({ storage: profileStorage });
 
+// set upload directory and filename callbacks for multer
+const storage = multer.diskStorage({
+  destination: function(req, file, cb) {
+    const rawType = Array.isArray(req.body.uploadType) ? req.body.uploadType[0] : req.body.uploadType;
+    const rawId = Array.isArray(req.body.userId) ? req.body.userId[0] : req.body.userId;
+
+    const strType = String(rawType || '');
+    const strId = String(rawId || '');
+
+    // 1. Validate 'type' and throw a 400 if invalid
+    const allowedTypes = { 'user': 'user', 'badge': 'badge' };
+    const safeType = allowedTypes[strType];
+
+    if (!safeType) {
+      const err = new Error('Unsupported uploadType');
+      err.status = 400; // Forces Express error handler to return 400 instead of 500
+      return cb(err);
+    }
+
+    // 2. Validate 'id' and throw a 400 if invalid
+    const match = strId.match(/^[a-zA-Z0-9-]+$/);
+    const safeId = match ? match : null;
+
+    if (!safeId) {
+      const err = new Error('Invalid user ID');
+      err.status = 400;
+      return cb(err);
+    }
+
+    let basePath = resolve('./uploads');
+    if (Array.isArray(basePath)) basePath = basePath[0];
+
+    try {
+      const uploadPath = join(String(basePath), String(safeType), String(safeId));
+
+      if (!uploadPath.startsWith(String(basePath))) {
+        const err = new Error('Path traversal attempt detected.');
+        err.status = 400;
+        return cb(err);
+      }
+
+      mkdirSync(uploadPath, { recursive: true });
+      cb(null, uploadPath);
+    } catch (err) {
+      cb(err);
+    }
+  },
+  filename: function(req, file, cb) {
+    cb(null, file.originalname);
+  }
+});
+
+const upload = multer({ storage: storage })
+
+app.post("/api/upload_image", upload.single("file"), async (req, res) => {
+  try {
+    // TODO: Add token verification here so you can only change your own picture
+    let result;
+    switch (req.body.uploadType) {
+      case "user":
+        result = await pool.query(
+          "UPDATE users SET image_url=$1 WHERE id=$2",
+          [`/uploads/${req.body.uploadType}/${req.body.userId}/${req.file.fieldname}`, req.body.userId]
+        );
+        console.log("user update finished");
+        if (result.rowCount === 0) {
+          return res.status(404).send("Failed to update the database, userId not found");
+        }
+        break;
+      case "badge":
+        result = await pool.query(
+          "UPDATE badges SET image_url=$1 WHERE id=$2 AND user_id=$3",
+          [`/uploads/${req.body.uploadType}/${req.body.userId}/${req.file.fieldname}`, req.body.badgeId, req.body.userId]
+        );
+        console.log("badge upload done");
+        if (result.rowCount === 0) {
+          return res.status(404).send("Failed to update the database, matching badge entry not found");
+        }
+        break;
+      default:
+        return res.status(400).send("Unsupported upload type.");
+    }
+    console.log("sending success msg");
+    res.send('File uploaded successfully');
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Database Error");
+  }
+});
+
 app.post("/api/users/:id/avatar", profileUpload.single("image"), async (req, res) => {
   try {
     const image_url = `/uploads/profiles/${req.file.filename}`;
