@@ -63,14 +63,16 @@ const upload = multer({
   },
 });
 
-app.post("/api/badges", upload.single("image"), async (req, res) => {
+app.post("/api/badges", (req, res, next) => {
+  upload.single("image")(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    if (!req.file) return res.status(400).json({ error: "Image file is required" });
+    next();
+  });
+}, async (req, res) => {
   try {
-    // In POST /api/badges, at the top of the try block:
-    if (!req.file) {
-      return res.status(400).json({ error: "Image file is required" });
-    }
     const { name, description } = req.body;
-    const image_url = req.file ? `/uploads/badges/${req.file.filename}` : null;
+    const image_url = `/uploads/badges/${req.file.filename}`;
     const result = await pool.query(
       "INSERT INTO badges(name, description, image_url) VALUES($1,$2,$3) RETURNING *",
       [name, description, image_url]
@@ -87,25 +89,20 @@ app.post("/api/badges", upload.single("image"), async (req, res) => {
   Volunteer account needs email, password, firstName, lastName, and phone
 */
 app.post("/api/registerVolunteer", async (req, res) => {
-  const client = await pool.connect();
-    let transactionStarted = false;
+  const { username, email, password, firstName, lastName, phone } = req.body;
 
+  if (!username || !email || !password || !firstName || !lastName) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  const client = await pool.connect();
+  let transactionStarted = false;
 
   try {
-    const { username, email, password, firstName, lastName, phone } = req.body;
-
-    if (!username || !email || !password || !firstName || !lastName) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
-
-    const client = await pool.connect();
-    let transactionStarted = false;
-
     await client.query("BEGIN");
     transactionStarted = true;
 
     const user_id = await createUser(client, username, email, password, phone, "VOLUNTEER");
-
     const full_name = `${firstName} ${lastName}`;
 
     const volunteerResult = await client.query(
@@ -119,19 +116,12 @@ app.post("/api/registerVolunteer", async (req, res) => {
     res.json({ id: volunteerResult.rows[0].id });
 
   } catch (err) {
-    if (transactionStarted) {
-      await client.query("ROLLBACK");
-    }
-
-    if (err.code === "23505") {
-      return res.status(409).json({ error: "User already exists" });
-    }
-
+    if (transactionStarted) await client.query("ROLLBACK");
+    if (err.code === "23505") return res.status(409).json({ error: "User already exists" });
     console.error(err);
     res.status(500).send("Database error");
-
   } finally {
-    if(client) client.release();
+    client.release();
   }
 });
 
