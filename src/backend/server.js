@@ -794,8 +794,6 @@ app.get("/api/organizations/by-user/:userId", async (req, res) => {
   }
 });
 
-
-// Lianna adding orgs for front end :P
 // get biz name 
 app.get("/api/organizations/buisnessname", async (req, res) => {
   try{
@@ -1217,6 +1215,39 @@ app.get("/api/organizations/:id", async (req, res) => {
   }
 });
 
+app.get("/api/images/:type/:userId", (req, res) => {
+  try {
+    const { type, userId } = req.params;
+
+    if (!["user", "badge"].includes(type)) {
+      return res.status(400).json({ error: "Invalid image type" });
+    }
+
+    let basePath = resolve('./uploads');
+    const dirPath = join(basePath, type, userId);
+    console.log(`${dirPath}`);
+
+    if (!existsSync(dirPath)) {
+      console.log("Dir doesn't exist");
+      return res.status(404).json({ error: "No images found" });
+    }
+
+    const files = readdirSync(dirPath);
+
+    // filter dotfiles
+    const imageFiles = files.filter(file => !file.startsWith("."));
+
+    const fileUrls = imageFiles.map(file =>
+      `/uploads/${type}/${userId}/${file}`
+    );
+
+    res.json({ images: fileUrls });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to retrieve images" });
+  }
+});
 
 app.delete("/api/events/:id", async (req, res) => {
   try {
