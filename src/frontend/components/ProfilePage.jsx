@@ -822,10 +822,9 @@ export default function ProfilePage() {
           <div
             style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.4)", backdropFilter: "blur(4px)" }}
             onClick={() => { setShowSettings(false); setEditing(false); }}
-            // Add to the stats div (only when s.key exists):
-            role={s.key ? "button" : undefined}
-            tabIndex={s.key ? 0 : undefined}
-            onKeyDown={e => s.key && (e.key === "Enter" || e.key === " ") && setMetric(s.key)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={e => (e.key === "Enter" || e.key === " ") && (setShowSettings(false), setEditing(false))}
           />
           <div style={{
             position: "relative", zIndex: 1,
