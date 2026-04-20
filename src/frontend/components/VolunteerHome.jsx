@@ -285,12 +285,6 @@ function EventDetailModal({
     fetch(`/api/events/${event.id}/volunteer-role/${volunteerId}`)
       .then(r => r.ok ? r.json() : null)
       .then(data => { if (data?.role_id) setMyRoleId(data.role_id); })
-      .then(r => r.json())
-        .then(data => {
-          setMyRegisteredEvents(data);
-          // ✅ Pre-populate registration set so modal shows correct status
-          setMyRegistrations(new Set(data.map(ev => ev.id)));
-        })
       .catch(console.error);
   }, [event?.id, volunteerId, registered]);
 

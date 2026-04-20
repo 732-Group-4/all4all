@@ -26,7 +26,6 @@ export default function OrgForm({ onSwitch }) {
     const [passErr, setPassErr] = useState(null);
     const [showPass, setShowPass]= useState(false);
     const [confirm, setConfirm] = useState("");
-    const [confirm, setConfirm] = useState("");
     const [confirmErr, setConfirmErr] = useState(null);
     const str = getPasswordStrength(password);
 
@@ -50,10 +49,16 @@ export default function OrgForm({ onSwitch }) {
 
 
     useEffect(() => {
-        fetch("/api/orgCategories")
-            .then((res) => res.json())
-            .then((data) => setCategories(data))
-            .catch(() => setCategoryErr("Could not load categories."));
+    fetch("/api/orgCategories")
+        .then((res) => {
+            if (!res.ok) throw new Error(`Server error: ${res.status}`);
+            return res.json();
+        })
+        .then((data) => setCategories(data))
+        .catch((err) => {
+            console.error(err);
+            setCategoryErr("Could not load categories.");
+        });
     }, []);
 
     
