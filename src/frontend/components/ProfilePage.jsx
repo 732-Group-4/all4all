@@ -23,6 +23,11 @@ function fmtHours(h) {
   return n > 0 ? n.toFixed(1) : "0";
 }
 
+function allowlist(str, pattern) {
+  if (typeof str !== "string") return "";
+  return (str.match(pattern) ?? []).join("");
+}
+
 // ─── URL Safety Helpers ───────────────────────────────────────────────────────
 
 // Accepts only positive integers — rejects anything else (strings, floats, etc.)
@@ -572,10 +577,10 @@ export default function ProfilePage() {
     }
 
     const safeUserCache = {
-      id: safeUid,
-      username: typeof updated.username === "string" ? updated.username.trim().replace(/[<>"']/g, "") : "",
-      email: typeof updated.email === "string" ? updated.email.trim().replace(/[<>"']/g, "") : "",
-      role: ["VOLUNTEER", "ORGANIZATION"].includes(updated.role) ? updated.role : null,
+      id:        safeUid,
+      username:  allowlist(updated.username, /[A-Za-z0-9._@-]/g),
+      email:     allowlist(updated.email,    /[A-Za-z0-9.@_+\-]/g),
+      role:      ["VOLUNTEER", "ORGANIZATION"].includes(updated.role) ? updated.role : null,
       image_url: typeof updated.image_url === "string" ? updated.image_url.trim() : null,
     };
 

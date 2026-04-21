@@ -12,6 +12,11 @@ function sanitizeId(raw) {
   return Number.isInteger(n) && n > 0 ? n : null;
 }
 
+function allowlist(str, pattern) {
+  if (typeof str !== "string") return "";
+  return (str.match(pattern) ?? []).join("");
+}
+
 export default function SignIn({ onSwitch }) {
   const navigate = useNavigate();
 
@@ -94,13 +99,9 @@ export default function SignIn({ onSwitch }) {
       localStorage.setItem("token", safeToken);
       localStorage.setItem("user", JSON.stringify({
         id: safeId,
-        username: typeof rawUser.username === "string"
-          ? rawUser.username.trim().replace(/[^A-Za-z0-9._@-]/g, "")
-          : "",
-        email: typeof rawUser.email === "string"
-          ? rawUser.email.trim().replace(/[^A-Za-z0-9.@_+-]/g, "")
-          : "",
-        role: safeUser.role,
+        username: allowlist(rawUser.username, /[A-Za-z0-9._@-]/g),
+        email:    allowlist(rawUser.email,    /[A-Za-z0-9.@_+\-]/g),
+        role:     safeUser.role,
       }));
 
       // Reset attempt counter on success
