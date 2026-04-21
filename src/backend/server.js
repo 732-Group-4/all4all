@@ -6,9 +6,8 @@ import jwt from "jsonwebtoken";
 import multer from "multer";
 import path from "path";
 import { fileURLToPath } from "url";
-import { dirname,join, resolve } from "path";
-import fs from "fs";
-import { existsSync, readdirSync } from "fs";
+import { dirname, join } from "path";
+import fs, { existsSync, readdirSync } from "fs";
 
 dotenv.config();
 
@@ -42,9 +41,40 @@ async function withTransaction(fn) {
   }
 }
 
+// Returns a single row or 404
+async function queryOne(res, sql, params, notFoundMsg = "Not found") {
+  try {
+    const result = await pool.query(sql, params);
+    if (result.rowCount === 0) return res.status(404).json({ error: notFoundMsg });
+    res.json(result.rows[0]);
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
+// Returns all rows as array
+async function queryMany(res, sql, params = []) {
+  try {
+    const result = await pool.query(sql, params);
+    res.json(result.rows);
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
+// Mutates (UPDATE/DELETE) and returns { success: true } or 404
+async function mutateOne(res, sql, params, notFoundMsg = "Not found") {
+  try {
+    const result = await pool.query(sql, params);
+    if (result.rowCount === 0) return res.status(404).json({ error: notFoundMsg });
+    res.json({ success: true });
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
 // ─── Multer Setup ─────────────────────────────────────────────────────────────
 
-// ---- image helpers ------
 const imageUpload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => {
@@ -55,16 +85,6 @@ const imageUpload = multer({
     },
     filename: (req, file, cb) => cb(null, `image_${Date.now()}${path.extname(file.originalname)}`),
   }),
-});
-
-app.post("/api/upload_image", imageUpload.single("file"), (req, res) => {
-  try {
-    const { uploadType, userId } = req.body;
-    const fileUrl = `/uploads/${uploadType}/${userId}/${req.file.filename}`;
-    res.json({ url: fileUrl });
-  } catch (err) {
-    handleError(res, err);
-  }
 });
 
 const profileUpload = multer({
@@ -134,14 +154,14 @@ app.post("/api/registerVolunteer", async (req, res) => {
   }
   try {
     const { volunteerId, userId } = await withTransaction(async (client) => {
-    const user_id = await createUser(client, username, email, password, phone, "VOLUNTEER");
-    const result = await client.query(
-      "INSERT INTO volunteers(user_id,full_name) VALUES($1,$2) RETURNING id",
-      [user_id, `${firstName} ${lastName}`]
-    );
-    return { volunteerId: result.rows[0].id, userId: user_id };
-  });
-  res.json({ id: volunteerId, user_id: userId });
+      const user_id = await createUser(client, username, email, password, phone, "VOLUNTEER");
+      const result = await client.query(
+        "INSERT INTO volunteers(user_id,full_name) VALUES($1,$2) RETURNING id",
+        [user_id, `${firstName} ${lastName}`]
+      );
+      return { volunteerId: result.rows[0].id, userId: user_id };
+    });
+    res.json({ id: volunteerId, user_id: userId });
   } catch (err) {
     if (err.code === "23505") return res.status(409).json({ error: "User already exists" });
     handleError(res, err);
@@ -160,54 +180,39 @@ app.get("/api/volunteers/zip_code", async (req, res) => {
   }
 });
 
-app.get("/api/volunteers/:id/registrations", async (req, res) => {
-  try {
-    const result = await pool.query(
-      `SELECT e.* FROM events e
-       JOIN event_registrations er ON er.event_id = e.id
-       JOIN volunteers v ON v.id = er.volunteer_id
-       WHERE v.user_id = $1
-       ORDER BY e.start_time`,
-      [req.params.id]
-    );
-    res.json(result.rows);
-  } catch (err) {
-    handleError(res, err);
-  }
-});
+app.get("/api/volunteers/:id/registrations", (req, res) =>
+  queryMany(res,
+    `SELECT e.* FROM events e
+     JOIN event_registrations er ON er.event_id = e.id
+     JOIN volunteers v ON v.id = er.volunteer_id
+     WHERE v.user_id = $1
+     ORDER BY e.start_time`,
+    [req.params.id]
+  )
+);
 
-app.get("/api/volunteers/:id/past-events", async (req, res) => {
-  try {
-    const result = await pool.query(
-      `SELECT e.*, er.attended, er.time_in, er.time_out
-       FROM events e
-       JOIN event_registrations er ON er.event_id = e.id
-       JOIN volunteers v ON v.id = er.volunteer_id
-       WHERE v.user_id = $1 AND e.end_time < NOW()
-       ORDER BY e.start_time DESC`,
-      [req.params.id]
-    );
-    res.json(result.rows);
-  } catch (err) {
-    handleError(res, err);
-  }
-});
+app.get("/api/volunteers/:id/past-events", (req, res) =>
+  queryMany(res,
+    `SELECT e.*, er.attended, er.time_in, er.time_out
+     FROM events e
+     JOIN event_registrations er ON er.event_id = e.id
+     JOIN volunteers v ON v.id = er.volunteer_id
+     WHERE v.user_id = $1 AND e.end_time < NOW()
+     ORDER BY e.start_time DESC`,
+    [req.params.id]
+  )
+);
 
-app.get("/api/volunteers/:id/badges", async (req, res) => {
-  try {
-    const result = await pool.query(
-      `SELECT b.name, b.description, b.image_url, vb.earned_at
-       FROM volunteer_badges vb
-       JOIN badges b ON b.id = vb.badge_id
-       WHERE vb.volunteer_id = $1
-       ORDER BY vb.earned_at DESC`,
-      [req.params.id]
-    );
-    res.json(result.rows);
-  } catch (err) {
-    handleError(res, err);
-  }
-});
+app.get("/api/volunteers/:id/badges", (req, res) =>
+  queryMany(res,
+    `SELECT b.name, b.description, b.image_url, vb.earned_at
+     FROM volunteer_badges vb
+     JOIN badges b ON b.id = vb.badge_id
+     WHERE vb.volunteer_id = $1
+     ORDER BY vb.earned_at DESC`,
+    [req.params.id]
+  )
+);
 
 app.post("/api/volunteers/:id/badges", async (req, res) => {
   try {
@@ -222,53 +227,43 @@ app.post("/api/volunteers/:id/badges", async (req, res) => {
   }
 });
 
-app.get("/api/volunteers/:id/service-hours", async (req, res) => {
-  try {
-    const result = await pool.query(
-      `SELECT e.id AS event_id, e.name AS event_name, e.start_time, e.end_time,
-              o.name AS organization_name,
-              COALESCE(json_agg(DISTINCT ec.name) FILTER (WHERE ec.name IS NOT NULL), '[]') AS tags,
-              er.attended, er.time_in, er.time_out,
-              CASE
-                WHEN er.time_in IS NOT NULL AND er.time_out IS NOT NULL
-                THEN EXTRACT(EPOCH FROM (er.time_out - er.time_in)) / 3600
-                WHEN e.start_time IS NOT NULL AND e.end_time IS NOT NULL AND er.attended
-                THEN EXTRACT(EPOCH FROM (e.end_time - e.start_time)) / 3600
-                ELSE 0
-              END AS hours
-       FROM event_registrations er
-       JOIN events e ON e.id = er.event_id
-       JOIN organizations o ON o.id = e.organization_id
-       JOIN volunteers v ON v.id = er.volunteer_id
-       LEFT JOIN event_category_links ecl ON ecl.event_id = e.id
-       LEFT JOIN event_categories ec ON ec.id = ecl.event_category_id
-       WHERE v.user_id = $1
-       GROUP BY e.id, e.name, e.start_time, e.end_time, o.name, er.attended, er.time_in, er.time_out
-       ORDER BY e.start_time DESC`,
-      [req.params.id]
-    );
-    res.json(result.rows);
-  } catch (err) {
-    handleError(res, err);
-  }
-});
+app.get("/api/volunteers/:id/service-hours", (req, res) =>
+  queryMany(res,
+    `SELECT e.id AS event_id, e.name AS event_name, e.start_time, e.end_time,
+            o.name AS organization_name,
+            COALESCE(json_agg(DISTINCT ec.name) FILTER (WHERE ec.name IS NOT NULL), '[]') AS tags,
+            er.attended, er.time_in, er.time_out,
+            CASE
+              WHEN er.time_in IS NOT NULL AND er.time_out IS NOT NULL
+              THEN EXTRACT(EPOCH FROM (er.time_out - er.time_in)) / 3600
+              WHEN e.start_time IS NOT NULL AND e.end_time IS NOT NULL AND er.attended
+              THEN EXTRACT(EPOCH FROM (e.end_time - e.start_time)) / 3600
+              ELSE 0
+            END AS hours
+     FROM event_registrations er
+     JOIN events e ON e.id = er.event_id
+     JOIN organizations o ON o.id = e.organization_id
+     JOIN volunteers v ON v.id = er.volunteer_id
+     LEFT JOIN event_category_links ecl ON ecl.event_id = e.id
+     LEFT JOIN event_categories ec ON ec.id = ecl.event_category_id
+     WHERE v.user_id = $1
+     GROUP BY e.id, e.name, e.start_time, e.end_time, o.name, er.attended, er.time_in, er.time_out
+     ORDER BY e.start_time DESC`,
+    [req.params.id]
+  )
+);
 
 // NOTE: keep AFTER all static-segment /api/volunteers/... routes
-app.get("/api/volunteers/:id", async (req, res) => {
-  try {
-    const result = await pool.query(
-      `SELECT v.id, v.full_name, u.email, u.phone_number
-       FROM volunteers v
-       JOIN users u ON u.id = v.user_id
-       WHERE v.user_id = $1`,
-      [req.params.id]
-    );
-    if (result.rowCount === 0) return res.status(404).json({ error: "Volunteer not found" });
-    res.json(result.rows[0]);
-  } catch (err) {
-    handleError(res, err);
-  }
-});
+app.get("/api/volunteers/:id", (req, res) =>
+  queryOne(res,
+    `SELECT v.id, v.full_name, u.email, u.phone_number
+     FROM volunteers v
+     JOIN users u ON u.id = v.user_id
+     WHERE v.user_id = $1`,
+    [req.params.id],
+    "Volunteer not found"
+  )
+);
 
 app.put("/api/volunteers/profile", async (req, res) => {
   try {
@@ -348,7 +343,6 @@ app.get("/api/organizations/brand_colors", async (req, res) => {
   }
 });
 
-/** Consolidated org profile endpoint for frontend use */
 app.get("/api/organizations/profile", async (req, res) => {
   try {
     const { user_id } = req.query;
@@ -387,34 +381,29 @@ app.get("/api/organizations/by-user/:userId", async (req, res) => {
   }
 });
 
-app.get("/api/organizations/:id/event-stats", async (req, res) => {
-  try {
-    const result = await pool.query(
-      `SELECT e.id, e.name, e.start_time, e.end_time, e.status,
-              COALESCE(json_agg(DISTINCT ec.name) FILTER (WHERE ec.name IS NOT NULL), '[]') AS tags,
-              COUNT(DISTINCT er.volunteer_id) AS volunteer_count,
-              COALESCE(SUM(
-                CASE
-                  WHEN er.time_in IS NOT NULL AND er.time_out IS NOT NULL
-                  THEN EXTRACT(EPOCH FROM (er.time_out - er.time_in)) / 3600
-                  WHEN er.attended THEN EXTRACT(EPOCH FROM (e.end_time - e.start_time)) / 3600
-                  ELSE 0
-                END
-              ), 0) AS total_hours
-       FROM events e
-       LEFT JOIN event_registrations er ON er.event_id = e.id
-       LEFT JOIN event_category_links ecl ON ecl.event_id = e.id
-       LEFT JOIN event_categories ec ON ec.id = ecl.event_category_id
-       WHERE e.organization_id = $1
-       GROUP BY e.id, e.name, e.start_time, e.end_time, e.status
-       ORDER BY e.start_time DESC`,
-      [req.params.id]
-    );
-    res.json(result.rows);
-  } catch (err) {
-    handleError(res, err);
-  }
-});
+app.get("/api/organizations/:id/event-stats", (req, res) =>
+  queryMany(res,
+    `SELECT e.id, e.name, e.start_time, e.end_time, e.status,
+            COALESCE(json_agg(DISTINCT ec.name) FILTER (WHERE ec.name IS NOT NULL), '[]') AS tags,
+            COUNT(DISTINCT er.volunteer_id) AS volunteer_count,
+            COALESCE(SUM(
+              CASE
+                WHEN er.time_in IS NOT NULL AND er.time_out IS NOT NULL
+                THEN EXTRACT(EPOCH FROM (er.time_out - er.time_in)) / 3600
+                WHEN er.attended THEN EXTRACT(EPOCH FROM (e.end_time - e.start_time)) / 3600
+                ELSE 0
+              END
+            ), 0) AS total_hours
+     FROM events e
+     LEFT JOIN event_registrations er ON er.event_id = e.id
+     LEFT JOIN event_category_links ecl ON ecl.event_id = e.id
+     LEFT JOIN event_categories ec ON ec.id = ecl.event_category_id
+     WHERE e.organization_id = $1
+     GROUP BY e.id, e.name, e.start_time, e.end_time, e.status
+     ORDER BY e.start_time DESC`,
+    [req.params.id]
+  )
+);
 
 // NOTE: keep AFTER all static-segment /api/organizations/... routes
 app.get("/api/organizations/:id/events", async (req, res) => {
@@ -440,24 +429,17 @@ app.get("/api/organizations/:id/events", async (req, res) => {
 });
 
 // NOTE: keep AFTER all static-segment /api/organizations/... routes
-app.get("/api/organizations/:id", async (req, res) => {
-  try {
-    const result = await pool.query("SELECT * FROM organizations WHERE id = $1", [req.params.id]);
-    if (result.rowCount === 0) return res.status(404).json({ error: "Organization not found" });
-    res.json(result.rows[0]);
-  } catch (err) {
-    handleError(res, err);
-  }
-});
+app.get("/api/organizations/:id", (req, res) =>
+  queryOne(res,
+    "SELECT * FROM organizations WHERE id = $1",
+    [req.params.id],
+    "Organization not found"
+  )
+);
 
-app.get("/api/orgCategories", async (req, res) => {
-  try {
-    const result = await pool.query("SELECT * FROM org_categories");
-    res.json(result.rows);
-  } catch (err) {
-    handleError(res, err);
-  }
-});
+app.get("/api/orgCategories", (req, res) =>
+  queryMany(res, "SELECT * FROM org_categories")
+);
 
 // ─── Shared Profile Helpers ───────────────────────────────────────────────────
 
@@ -491,6 +473,16 @@ app.post("/api/users/:id/avatar", profileUpload.single("image"), async (req, res
     const image_url = `/uploads/profiles/${req.file.filename}`;
     await pool.query("UPDATE users SET image_url = $1 WHERE id = $2", [image_url, req.params.id]);
     res.json({ image_url });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.post("/api/upload_image", imageUpload.single("file"), (req, res) => {
+  try {
+    const { uploadType, userId } = req.body;
+    const fileUrl = `/uploads/${uploadType}/${userId}/${req.file.filename}`;
+    res.json({ url: fileUrl });
   } catch (err) {
     handleError(res, err);
   }
@@ -536,63 +528,34 @@ app.put("/api/events/:id", async (req, res) => {
   }
 });
 
-app.delete("/api/events/:id", async (req, res) => {
-  try {
-    const result = await pool.query("DELETE FROM events WHERE id = $1 RETURNING id", [req.params.id]);
-    if (result.rowCount === 0) return res.status(404).json({ error: "Event not found" });
-    res.json({ success: true });
-  } catch (err) {
-    handleError(res, err);
-  }
-});
+app.delete("/api/events/:id", (req, res) =>
+  mutateOne(res, "DELETE FROM events WHERE id = $1 RETURNING id", [req.params.id], "Event not found")
+);
 
-app.get("/api/events", async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT e.*,
-             o.name AS organization_name,
-             COALESCE(json_agg(DISTINCT ec.name) FILTER (WHERE ec.name IS NOT NULL), '[]') AS tags,
-             COUNT(DISTINCT er.id) AS volunteer_count
-      FROM events e
-      LEFT JOIN organizations o ON o.id = e.organization_id
-      LEFT JOIN event_category_links ecl ON ecl.event_id = e.id
-      LEFT JOIN event_categories ec ON ec.id = ecl.event_category_id
-      LEFT JOIN event_registrations er ON er.event_id = e.id
-      WHERE e.status = 'PUBLISHED'
-      GROUP BY e.id, o.name
-      ORDER BY e.start_time
-    `);
-    res.json(result.rows);
-  } catch (err) {
-    handleError(res, err);
-  }
-});
+app.get("/api/events", (req, res) =>
+  queryMany(res,
+    `SELECT e.*,
+            o.name AS organization_name,
+            COALESCE(json_agg(DISTINCT ec.name) FILTER (WHERE ec.name IS NOT NULL), '[]') AS tags,
+            COUNT(DISTINCT er.id) AS volunteer_count
+     FROM events e
+     LEFT JOIN organizations o ON o.id = e.organization_id
+     LEFT JOIN event_category_links ecl ON ecl.event_id = e.id
+     LEFT JOIN event_categories ec ON ec.id = ecl.event_category_id
+     LEFT JOIN event_registrations er ON er.event_id = e.id
+     WHERE e.status = 'PUBLISHED'
+     GROUP BY e.id, o.name
+     ORDER BY e.start_time`
+  )
+);
 
-app.put("/api/events/:id/publish", async (req, res) => {
-  try {
-    const result = await pool.query(
-      "UPDATE events SET status = 'PUBLISHED' WHERE id = $1 RETURNING id",
-      [req.params.id]
-    );
-    if (result.rowCount === 0) return res.status(404).json({ error: "Event not found" });
-    res.json({ success: true });
-  } catch (err) {
-    handleError(res, err);
-  }
-});
+app.put("/api/events/:id/publish", (req, res) =>
+  mutateOne(res, "UPDATE events SET status = 'PUBLISHED' WHERE id = $1 RETURNING id", [req.params.id], "Event not found")
+);
 
-app.put("/api/events/:id/cancel", async (req, res) => {
-  try {
-    const result = await pool.query(
-      "UPDATE events SET status = 'CANCELLED' WHERE id = $1 RETURNING id",
-      [req.params.id]
-    );
-    if (result.rowCount === 0) return res.status(404).json({ error: "Event not found" });
-    res.json({ success: true });
-  } catch (err) {
-    handleError(res, err);
-  }
-});
+app.put("/api/events/:id/cancel", (req, res) =>
+  mutateOne(res, "UPDATE events SET status = 'CANCELLED' WHERE id = $1 RETURNING id", [req.params.id], "Event not found")
+);
 
 // ─── Event Registrations ──────────────────────────────────────────────────────
 
@@ -630,23 +593,18 @@ app.delete("/api/events/:id/register", async (req, res) => {
   }
 });
 
-app.get("/api/events/:id/registrations", async (req, res) => {
-  try {
-    const result = await pool.query(
-      `SELECT v.id AS volunteer_id, v.full_name, u.email, u.phone_number,
-              er.registered_at, er.attended, er.time_in, er.time_out
-       FROM event_registrations er
-       JOIN volunteers v ON v.id = er.volunteer_id
-       JOIN users u ON u.id = v.user_id
-       WHERE er.event_id = $1
-       ORDER BY er.registered_at`,
-      [req.params.id]
-    );
-    res.json(result.rows);
-  } catch (err) {
-    handleError(res, err);
-  }
-});
+app.get("/api/events/:id/registrations", (req, res) =>
+  queryMany(res,
+    `SELECT v.id AS volunteer_id, v.full_name, u.email, u.phone_number,
+            er.registered_at, er.attended, er.time_in, er.time_out
+     FROM event_registrations er
+     JOIN volunteers v ON v.id = er.volunteer_id
+     JOIN users u ON u.id = v.user_id
+     WHERE er.event_id = $1
+     ORDER BY er.registered_at`,
+    [req.params.id]
+  )
+);
 
 app.get("/api/events/:id/registrations/count", async (req, res) => {
   try {
@@ -701,23 +659,18 @@ app.post("/api/events/:id/roles", async (req, res) => {
   }
 });
 
-app.get("/api/events/:id/roles", async (req, res) => {
-  try {
-    const result = await pool.query(
-      `SELECT er.id, er.name, er.spots,
-              COUNT(err.id) AS filled
-       FROM event_roles er
-       LEFT JOIN event_role_registrations err ON err.role_id = er.id
-       WHERE er.event_id = $1
-       GROUP BY er.id
-       ORDER BY er.id`,
-      [req.params.id]
-    );
-    res.json(result.rows);
-  } catch (err) {
-    handleError(res, err);
-  }
-});
+app.get("/api/events/:id/roles", (req, res) =>
+  queryMany(res,
+    `SELECT er.id, er.name, er.spots,
+            COUNT(err.id) AS filled
+     FROM event_roles er
+     LEFT JOIN event_role_registrations err ON err.role_id = er.id
+     WHERE er.event_id = $1
+     GROUP BY er.id
+     ORDER BY er.id`,
+    [req.params.id]
+  )
+);
 
 app.get("/api/events/:id/volunteer-role/:volunteerId", async (req, res) => {
   try {
@@ -766,11 +719,10 @@ app.post("/api/roles/:id/register", async (req, res) => {
       "INSERT INTO event_role_registrations(role_id, volunteer_id) VALUES($1, $2)",
       [role_id, volunteer_id]
     );
-    res.json({ success: true});
+    res.json({ success: true });
   } catch (err) {
     if (err.code === "23505") return res.status(409).json({ error: "Already registered for this role" });
     if (err.code === "22P02") return res.status(404).json({ error: "Role not found" });
-
     handleError(res, err);
   } finally {
     client.release();
@@ -791,21 +743,16 @@ app.delete("/api/roles/:id/register", async (req, res) => {
   }
 });
 
-app.get("/api/roles/:id/volunteers", async (req, res) => {
-  try {
-    const result = await pool.query(
-      `SELECT v.id, v.full_name, u.email, u.phone_number
-       FROM event_role_registrations err
-       JOIN volunteers v ON v.id = err.volunteer_id
-       JOIN users u ON u.id = v.user_id
-       WHERE err.role_id = $1`,
-      [req.params.id]
-    );
-    res.json(result.rows);
-  } catch (err) {
-    handleError(res, err);
-  }
-});
+app.get("/api/roles/:id/volunteers", (req, res) =>
+  queryMany(res,
+    `SELECT v.id, v.full_name, u.email, u.phone_number
+     FROM event_role_registrations err
+     JOIN volunteers v ON v.id = err.volunteer_id
+     JOIN users u ON u.id = v.user_id
+     WHERE err.role_id = $1`,
+    [req.params.id]
+  )
+);
 
 // ─── Event Tags ───────────────────────────────────────────────────────────────
 
@@ -835,28 +782,18 @@ app.post("/api/events/:id/tags", async (req, res) => {
   }
 });
 
-app.get("/api/events/:id/tags", async (req, res) => {
-  try {
-    const result = await pool.query(
-      `SELECT ec.id, ec.name FROM event_category_links ecl
-       JOIN event_categories ec ON ec.id = ecl.event_category_id
-       WHERE ecl.event_id = $1`,
-      [req.params.id]
-    );
-    res.json(result.rows);
-  } catch (err) {
-    handleError(res, err);
-  }
-});
+app.get("/api/events/:id/tags", (req, res) =>
+  queryMany(res,
+    `SELECT ec.id, ec.name FROM event_category_links ecl
+     JOIN event_categories ec ON ec.id = ecl.event_category_id
+     WHERE ecl.event_id = $1`,
+    [req.params.id]
+  )
+);
 
-app.get("/api/eventCategories", async (req, res) => {
-  try {
-    const result = await pool.query("SELECT * FROM event_categories ORDER BY name");
-    res.json(result.rows);
-  } catch (err) {
-    handleError(res, err);
-  }
-});
+app.get("/api/eventCategories", (req, res) =>
+  queryMany(res, "SELECT * FROM event_categories ORDER BY name")
+);
 
 // ─── Badges ───────────────────────────────────────────────────────────────────
 
@@ -880,14 +817,9 @@ app.post("/api/badges", (req, res, next) => {
   }
 });
 
-app.get("/api/badges", async (req, res) => {
-  try {
-    const result = await pool.query("SELECT * FROM badges ORDER BY id");
-    res.json(result.rows);
-  } catch (err) {
-    handleError(res, err);
-  }
-});
+app.get("/api/badges", (req, res) =>
+  queryMany(res, "SELECT * FROM badges ORDER BY id")
+);
 
 app.post("/api/events/:id/badges", async (req, res) => {
   const client = await pool.connect();
@@ -909,20 +841,17 @@ app.post("/api/events/:id/badges", async (req, res) => {
   }
 });
 
-app.get("/api/events/:id/badges", async (req, res) => {
-  try {
-    const result = await pool.query(
-      `SELECT b.id, b.name, b.description, b.image_url
-       FROM event_badges eb
-       JOIN badges b ON b.id = eb.badge_id
-       WHERE eb.event_id = $1`,
-      [req.params.id]
-    );
-    res.json(result.rows);
-  } catch (err) {
-    handleError(res, err);
-  }
-});
+app.get("/api/events/:id/badges", (req, res) =>
+  queryMany(res,
+    `SELECT b.id, b.name, b.description, b.image_url
+     FROM event_badges eb
+     JOIN badges b ON b.id = eb.badge_id
+     WHERE eb.event_id = $1`,
+    [req.params.id]
+  )
+);
+
+// ─── Images ───────────────────────────────────────────────────────────────────
 
 app.get("/api/images/:type/:userId", (req, res) => {
   try {
@@ -932,25 +861,17 @@ app.get("/api/images/:type/:userId", (req, res) => {
       return res.status(400).json({ error: "Invalid image type" });
     }
 
-    const basePath = join(__dirname, 'uploads');
+    const basePath = join(__dirname, "uploads");
     const dirPath = join(basePath, type, userId);
 
     if (!existsSync(dirPath)) {
-      console.log("Dir doesn't exist");
       return res.status(404).json({ error: "No images found" });
     }
 
-    const files = readdirSync(dirPath);
-
-    // filter dotfiles
-    const imageFiles = files.filter(file => !file.startsWith("."));
-
-    const fileUrls = imageFiles.map(file =>
-      `/uploads/${type}/${userId}/${file}`
-    );
+    const imageFiles = readdirSync(dirPath).filter(file => !file.startsWith("."));
+    const fileUrls = imageFiles.map(file => `/uploads/${type}/${userId}/${file}`);
 
     res.json({ images: fileUrls });
-
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to retrieve images" });
