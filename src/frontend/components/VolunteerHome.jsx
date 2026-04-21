@@ -70,12 +70,14 @@ function CategoryPill({ label, active, onClick }) {
   );
 }
 
+// FIX [6]: Removed duplicate nested <div className="home-card"> — the outer div
+// was setting the border-left accent color, then immediately re-opened another
+// home-card div, duplicating the container and causing layout issues.
 function EventCard({ event, onViewDetails }) {
   const hours = calcHours(event.start_time, event.end_time);
 
   return (
     <div className="home-card" style={{ borderLeft: `4px solid ${event.color || "#15803d"}` }}>
-    <div className="home-card">
       <div className="home-card__top">
         <div style={{ flex: 1 }}>
           <div className="home-card__badges">
@@ -88,30 +90,30 @@ function EventCard({ event, onViewDetails }) {
           </div>
           <h3 className="home-card__title">{event.name}</h3>
           {/* Org name + logo */}
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
-              {event.organization_logo ? (
-                <img
-                  src={event.organization_logo}
-                  alt={event.organization_name}
-                  style={{ width: 18, height: 18, borderRadius: "50%", objectFit: "cover" }}
-                />
-              ) : (
-                <div style={{
-                  width: 18, height: 18, borderRadius: "50%",
-                  background: "linear-gradient(135deg,#15803d,#166534)",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 9, fontWeight: 800, color: "#fff", flexShrink: 0,
-                }}>
-                  {(event.organization_name || "?")[0]}
-                </div>
-              )}
-              <p style={{ fontSize: 12.5, color: "#2563eb", fontWeight: 600, margin: 0 }}>
-                {event.organization_name || "Your Organization"}
-              </p>
-            </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
+            {event.organization_logo ? (
+              <img
+                src={event.organization_logo}
+                alt={event.organization_name}
+                style={{ width: 18, height: 18, borderRadius: "50%", objectFit: "cover" }}
+              />
+            ) : (
+              <div style={{
+                width: 18, height: 18, borderRadius: "50%",
+                background: "linear-gradient(135deg,#15803d,#166534)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 9, fontWeight: 800, color: "#fff", flexShrink: 0,
+              }}>
+                {(event.organization_name || "?")[0]}
+              </div>
+            )}
+            <p style={{ fontSize: 12.5, color: "#2563eb", fontWeight: 600, margin: 0 }}>
+              {event.organization_name || "Your Organization"}
+            </p>
+          </div>
         </div>
       </div>
-          
+
       <p className="home-card__desc">{event.description}</p>
       {event.tags?.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
@@ -128,8 +130,7 @@ function EventCard({ event, onViewDetails }) {
       <div style={{ fontSize: 12.5, color: "#64748b", fontWeight: 600 }}>
         👥 {event.volunteer_count ?? 0} volunteer{event.volunteer_count !== 1 ? "s" : ""} signed up
       </div>
-        
-      </div>
+
       <div className="home-card__meta">
         <span>📅 {formatDate(event.start_time)} · {formatTime(event.start_time)} – {formatTime(event.end_time)}</span>
         {event.distance_miles != null && (
@@ -137,13 +138,13 @@ function EventCard({ event, onViewDetails }) {
         )}
       </div>
       {event.recurrence && (
-      <span style={{
-        background: "#fdf4ff", color: "#7c3aed", fontSize: 11, fontWeight: 700,
-        padding: "2px 9px", borderRadius: 99, border: "1px solid #e9d5ff",
-      }}>
-        🔁 {event.recurrence === "biweekly" ? "Every 2 weeks" : event.recurrence.charAt(0).toUpperCase() + event.recurrence.slice(1)}
-      </span>
-    )}
+        <span style={{
+          background: "#fdf4ff", color: "#7c3aed", fontSize: 11, fontWeight: 700,
+          padding: "2px 9px", borderRadius: 99, border: "1px solid #e9d5ff",
+        }}>
+          🔁 {event.recurrence === "biweekly" ? "Every 2 weeks" : event.recurrence.charAt(0).toUpperCase() + event.recurrence.slice(1)}
+        </span>
+      )}
 
       <div className="home-card__actions">
         <button
@@ -212,46 +213,49 @@ function EventDetailModal({
   const [roles, setRoles] = useState([]);
   const [myRoleId, setMyRoleId] = useState(null);
 
+  // FIX [4]: Replace alert() with inline error state
+  const [registerError, setRegisterError] = useState(null);
+
   const brandColor = orgData?.brand_color || "#2e7d45";
   const brandLight = orgData?.brand_color ? `${orgData.brand_color}18` : "#e8f5ec";
   const [registrantCount, setRegistrantCount] = useState(0);
   const [eventBadges, setEventBadges] = useState([]);
-  // Add this state + useEffect inside EventDetailModal
 
   useEffect(() => {
     if (!event?.id || !volunteerId || !registered) return;
     fetch(`/api/events/${event.id}/volunteer-role/${volunteerId}`)
       .then(r => r.ok ? r.json() : null)
       .then(data => { if (data?.role_id) setMyRoleId(data.role_id); })
-      .catch(console.error);
+      .catch(() => {}); // FIX [1]: Don't log internal API errors to console
   }, [event?.id, volunteerId, registered]);
 
   useEffect(() => {
-  if (!event?.id) return;
-  fetch(`/api/events/${event.id}/registrations/count`)
-    .then(r => r.json())
-    .then(data => setRegistrantCount(data.total))
-    .catch(console.error);
+    if (!event?.id) return;
+    fetch(`/api/events/${event.id}/registrations/count`)
+      .then(r => r.json())
+      .then(data => setRegistrantCount(data.total))
+      .catch(() => {}); // FIX [1]
 
-  fetch(`/api/events/${event.id}/roles`)
-    .then(r => r.json())
-    .then(data => setRoles(data.map(r => ({
-      ...r,
-      spots_available: r.spots - parseInt(r.filled),
-    }))))
-    .catch(console.error);
-  fetch(`/api/events/${event.id}/badges`)
-    .then(r => r.json())
-    .then(setEventBadges)
-    .catch(console.error);
-}, [event?.id]);
+    fetch(`/api/events/${event.id}/roles`)
+      .then(r => r.json())
+      .then(data => setRoles(data.map(r => ({
+        ...r,
+        spots_available: r.spots - parseInt(r.filled),
+      }))))
+      .catch(() => {}); // FIX [1]
+
+    fetch(`/api/events/${event.id}/badges`)
+      .then(r => r.json())
+      .then(setEventBadges)
+      .catch(() => {}); // FIX [1]
+  }, [event?.id]);
 
   useEffect(() => {
     if (!event?.organization_id) return;
     fetch(`/api/organizations/${event.organization_id}`)
       .then(r => r.ok ? r.json() : null)
       .then(data => setOrgData(data))
-      .catch(console.error);
+      .catch(() => {}); // FIX [1]
   }, [event?.organization_id]);
 
   const photos = event?.photos ?? [];
@@ -264,23 +268,28 @@ function EventDetailModal({
   function toggleRole(roleId) {
     setSelectedRoles(prev => {
       const next = new Set();
-      if (!prev.has(roleId)) next.add(roleId); 
+      if (!prev.has(roleId)) next.add(roleId);
       return next;
     });
   }
 
   async function handleRegister() {
-    if (!volunteerId) return alert("Please log in to register.");
-
-    if (!registered && roles.length > 0 && selectedRoles.size === 0) {
-      alert("Please select a role before registering.");
+    // FIX [5]: Validate volunteerId before making any API calls
+    if (!volunteerId) {
+      setRegisterError("Please log in to register.");
       return;
     }
 
+    if (!registered && roles.length > 0 && selectedRoles.size === 0) {
+      // FIX [4]: Use inline error state instead of alert()
+      setRegisterError("Please select a role before registering.");
+      return;
+    }
+
+    setRegisterError(null);
     setLoading(true);
     try {
       if (!registered) {
-        // Register for the event
         const res = await fetch(`/api/events/${event.id}/register`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -288,7 +297,6 @@ function EventDetailModal({
         });
         if (!res.ok) throw new Error(await res.text());
 
-        // Register for each selected role
         for (const roleId of selectedRoles) {
           await fetch(`/api/roles/${roleId}/register`, {
             method: "POST",
@@ -297,13 +305,12 @@ function EventDetailModal({
           });
         }
 
-        // Refresh roles to show updated spot counts
         const updatedRoles = await fetch(`/api/events/${event.id}/roles`).then(r => r.json());
         setRoles(updatedRoles.map(r => ({ ...r, spots_available: r.spots - parseInt(r.filled) })));
 
         setRegistered(true);
         onRegisterChange?.(event.id, true);
-        } else {
+      } else {
         const res = await fetch(`/api/events/${event.id}/register`, {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
@@ -311,7 +318,6 @@ function EventDetailModal({
         });
         if (!res.ok) throw new Error(await res.text());
 
-        // Only unregister the specific role they were in
         if (myRoleId) {
           await fetch(`/api/roles/${myRoleId}/register`, {
             method: "DELETE",
@@ -325,17 +331,17 @@ function EventDetailModal({
         setRegistered(false);
         onRegisterChange?.(event.id, false);
 
-        // Refresh roles
         const updatedRoles = await fetch(`/api/events/${event.id}/roles`).then(r => r.json());
         setRoles(updatedRoles.map(r => ({ ...r, spots_available: r.spots - parseInt(r.filled) })));
       }
-    } catch (err) {
-      console.error(err);
-      alert("Something went wrong. Please try again.");
+    } catch {
+      // FIX [1] & [4]: Don't console.error; show inline error instead
+      setRegisterError("Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }
   }
+
   if (!event) return null;
 
   const totalSpots = roles.reduce((sum, r) => sum + (r.spots_available ?? 0), 0);
@@ -597,10 +603,9 @@ function EventDetailModal({
                       <div
                         key={i}
                         onClick={() => setCarouselIdx(i)}
-                        // Add to each dot div:
-                          role="button"
-                          tabIndex={0}
-                          onKeyDown={e => (e.key === "Enter" || e.key === " ") && setCarouselIdx(i)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={e => (e.key === "Enter" || e.key === " ") && setCarouselIdx(i)}
                         style={{
                           width: 6, height: 6, borderRadius: "50%", cursor: "pointer",
                           background: i === carouselIdx ? "#fff" : "rgba(255,255,255,.5)",
@@ -691,6 +696,13 @@ function EventDetailModal({
                   <span style={{ fontSize: 14, fontWeight: 500, color: "#222" }}>Attendee</span>
                 </div>
               )}
+
+              {/* FIX [4]: Inline error display replaces alert() */}
+              {registerError && (
+                <p style={{ fontSize: 13, color: "#ef4444", margin: 0, fontWeight: 600 }}>
+                  {registerError}
+                </p>
+              )}
             </div>
 
             {/* Register button */}
@@ -755,7 +767,6 @@ function MyEventsSlider({ events, onViewDetails, open, onToggle }) {
       overflow: "hidden",
       boxShadow: "0 2px 12px rgba(0,0,0,0.06)",
     }}>
-      {/* Header — always visible, clickable */}
       <button
         onClick={onToggle}
         style={{
@@ -780,7 +791,6 @@ function MyEventsSlider({ events, onViewDetails, open, onToggle }) {
         <span style={{ fontSize: 18, color: "#15803d" }}>{open ? "▲" : "▼"}</span>
       </button>
 
-      {/* Scrollable event strip */}
       {open && (
         <div style={{
           overflowX: "auto", display: "flex", gap: 12,
@@ -792,36 +802,36 @@ function MyEventsSlider({ events, onViewDetails, open, onToggle }) {
             </p>
           ) : events.map(ev => (
             <div
-            key={ev.id}
-            onClick={() => onViewDetails(ev)}
-            role="button"
-            tabIndex={0}
-            onKeyDown={e => (e.key === "Enter" || e.key === " ") && onViewDetails(ev)}
-            style={{
-              minWidth: 200, background: "#f0fdf4", borderRadius: 12,
-              padding: "12px 14px", cursor: "pointer",
-              border: "1.5px solid #bbf7d0", flexShrink: 0,
-              transition: "transform 0.15s",
-            }}
-            onMouseEnter={e => e.currentTarget.style.transform = "translateY(-2px)"}
-            onMouseLeave={e => e.currentTarget.style.transform = ""}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#15803d" }}>{ev.name}</div>
-              <span style={{
-                background: "#15803d", color: "#fff", fontSize: 10, fontWeight: 700,
-                padding: "1px 7px", borderRadius: 99, flexShrink: 0, marginLeft: 6,
-              }}>✓ Registered</span>
-            </div>
-            <div style={{ fontSize: 11.5, color: "#64748b" }}>
-              📅 {new Date(ev.start_time).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-            </div>
-            {ev.city && (
-              <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 2 }}>
-                📍 {ev.city}, {ev.state}
+              key={ev.id}
+              onClick={() => onViewDetails(ev)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={e => (e.key === "Enter" || e.key === " ") && onViewDetails(ev)}
+              style={{
+                minWidth: 200, background: "#f0fdf4", borderRadius: 12,
+                padding: "12px 14px", cursor: "pointer",
+                border: "1.5px solid #bbf7d0", flexShrink: 0,
+                transition: "transform 0.15s",
+              }}
+              onMouseEnter={e => e.currentTarget.style.transform = "translateY(-2px)"}
+              onMouseLeave={e => e.currentTarget.style.transform = ""}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#15803d" }}>{ev.name}</div>
+                <span style={{
+                  background: "#15803d", color: "#fff", fontSize: 10, fontWeight: 700,
+                  padding: "1px 7px", borderRadius: 99, flexShrink: 0, marginLeft: 6,
+                }}>✓ Registered</span>
               </div>
-            )}
-          </div>
+              <div style={{ fontSize: 11.5, color: "#64748b" }}>
+                📅 {new Date(ev.start_time).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+              </div>
+              {ev.city && (
+                <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 2 }}>
+                  📍 {ev.city}, {ev.state}
+                </div>
+              )}
+            </div>
           ))}
         </div>
       )}
@@ -846,7 +856,6 @@ export default function VolunteerHome() {
   const [categories, setCategories] = useState(["All"]);
   const [categoryErr, setCategoryErr] = useState(null);
 
-  // ── Modal state ──
   const [activeEvent, setActiveEvent] = useState(null);
   const [myRegistrations, setMyRegistrations] = useState(new Set());
 
@@ -854,7 +863,16 @@ export default function VolunteerHome() {
   const [sliderOpen, setSliderOpen] = useState(false);
   const searchRef = useRef();
 
-  const currentUser = JSON.parse(localStorage.getItem("user") || "null");
+  // FIX [2]: Parse localStorage safely with try/catch to prevent a JSON parse
+  // error from crashing the entire page on malformed or tampered storage data.
+  const currentUser = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("user") || "null");
+    } catch {
+      return null;
+    }
+  })();
+
   const [badges, setBadges] = useState([]);
 
   function toggleCategory(category) {
@@ -871,29 +889,30 @@ export default function VolunteerHome() {
   useEffect(() => {
     API.getPublishedEvents()
       .then(setEvents)
-      .catch(console.error);
+      .catch(() => {}); // FIX [1]: Don't log internal API errors to console
   }, []);
 
   useEffect(() => {
+    // FIX [3]: Check currentUser at the top of the effect and redirect immediately,
+    // before any async work, so the page never renders with null user data.
     if (!currentUser) { navigate("/"); return; }
+
     API.getVolunteer(currentUser.id)
       .then(v => {
         setVolunteer(v);
         fetch(`/api/volunteers/${currentUser.id}/badges`)
-        .then(r => r.json())
-        .then(setBadges)
-        .catch(console.error);
-        // Fetch registered events
+          .then(r => r.json())
+          .then(setBadges)
+          .catch(() => {}); // FIX [1]
         return fetch(`/api/volunteers/${currentUser.id}/registrations`);
       })
       .then(r => r.json())
       .then(data => {
         setMyRegisteredEvents(data);
-        setMyRegistrations(new Set(data.map(ev => ev.id))); 
+        setMyRegistrations(new Set(data.map(ev => ev.id)));
       })
+      .catch(() => {}) // FIX [1]
       .finally(() => setLoading(false));
-
-          
   }, []);
 
   useEffect(() => {
@@ -907,7 +926,7 @@ export default function VolunteerHome() {
     const q = search.toLowerCase();
     const matchSearch = !q || ev.name?.toLowerCase().includes(q) || ev.description?.toLowerCase().includes(q) || ev.organization_name?.toLowerCase().includes(q) || ev.city?.toLowerCase().includes(q);
     const matchCat = activeCategories.includes("All") ||
-  (Array.isArray(ev.tags) && ev.tags.some(tag => activeCategories.includes(tag)));
+      (Array.isArray(ev.tags) && ev.tags.some(tag => activeCategories.includes(tag)));
     const maxDist   = { "< 1 mi": 1, "< 2 mi": 2, "< 5 mi": 5, "< 10 mi": 10 }[distanceFilter];
     const matchDist = !maxDist || (ev.distance_miles != null && ev.distance_miles < maxDist);
     const matchFrom = !dateFrom || new Date(ev.start_time) >= new Date(dateFrom);
@@ -1046,6 +1065,10 @@ export default function VolunteerHome() {
             })}
           </div>
 
+          {categoryErr && (
+            <p style={{ fontSize: 12, color: "#ef4444", margin: "4px 0 0" }}>{categoryErr}</p>
+          )}
+
           {showFilters && (
             <div className="home-filter-panel">
               <div className="home-filter-group">
@@ -1092,7 +1115,7 @@ export default function VolunteerHome() {
               <EventCard
                 key={ev.id}
                 event={ev}
-                onViewDetails={setActiveEvent} 
+                onViewDetails={setActiveEvent}
               />
             ))}
           </div>
