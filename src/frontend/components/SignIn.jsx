@@ -14,15 +14,12 @@ export default function SignIn({ onSwitch }) {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  // FIX [4]: Track failed attempts to provide a client-side lockout.
-  // This does NOT replace server-side rate limiting, which is still required.
   const [attempts, setAttempts] = useState(0);
   const [lockedUntil, setLockedUntil] = useState(null);
 
   const isLocked = lockedUntil && Date.now() < lockedUntil;
 
   async function handleSubmit() {
-    // FIX [4]: Refuse submission while locked out
     if (isLocked) {
       const secs = Math.ceil((lockedUntil - Date.now()) / 1000);
       setError(`Too many failed attempts. Please wait ${secs}s before trying again.`);
@@ -45,15 +42,12 @@ export default function SignIn({ onSwitch }) {
       });
 
       if (!res.ok) {
-        // FIX [3]: Always derive a plain string for the error state.
-        // FIX [2]: Do not console.error the raw server response.
         const text = await res.text();
         // Use a generic message for the user; avoid echoing raw server internals.
         const userMessage = res.status === 401
           ? "Invalid username or password."
           : "Sign in failed. Please try again.";
 
-        // FIX [4]: Increment attempt counter and lock if threshold reached
         const nextAttempts = attempts + 1;
         setAttempts(nextAttempts);
         if (nextAttempts >= MAX_ATTEMPTS) {
@@ -64,7 +58,6 @@ export default function SignIn({ onSwitch }) {
           setError(userMessage);
         }
 
-        // Suppress the raw error — log to a monitoring service in production instead
         void text;
         setLoading(false);
         return;
@@ -72,29 +65,38 @@ export default function SignIn({ onSwitch }) {
 
       const data = await res.json();
 
-      // FIX [1]: Do not log user details to the console after sign-in.
-      // FIX [5]: Store only the minimal fields needed for client-side display.
-      localStorage.setItem("token", data.token);
-      localStorage.setItem("user", JSON.stringify({
-        id:       data.user.id,
-        username: data.user.username,
-        email:    data.user.email,
-        role:     data.user.role,
-      }));
+      // Sanitize token — must be a non-empty string with no whitespace
+      const safeToken = typeof data.token === "string" ? data.token.trim() : null;
+
+      // Sanitize each user field individually
+      const ALLOWED_ROLES = new Set(["VOLUNTEER", "ORGANIZATION"]);
+      const safeUser = {
+        id: Number.isInteger(data.user.id) ? data.user.id : null,
+        username: typeof data.user.username === "string" ? data.user.username.trim() : "",
+        email: typeof data.user.email === "string" ? data.user.email.trim() : "",
+        role: ALLOWED_ROLES.has(data.user.role) ? data.user.role : null,
+      };
+
+      if (!safeToken || !safeUser.id || !safeUser.role) {
+        setError("Sign in failed. Please try again.");
+        setLoading(false);
+        return;
+      }
+
+      localStorage.setItem("token", safeToken);
+      localStorage.setItem("user", JSON.stringify(safeUser));
 
       // Reset attempt counter on success
       setAttempts(0);
       setLockedUntil(null);
 
-      // Redirect based on role
-      if (data.user.role === "VOLUNTEER") {
+      if (safeUser.role === "VOLUNTEER") {
         navigate("/home");
-      } else if (data.user.role === "ORGANIZATION") {
+      } else if (safeUser.role === "ORGANIZATION") {
         navigate("/org-home");
       }
 
     } catch {
-      // FIX [2] & [3]: Don't console.error or store the raw Error object.
       setError("An unexpected error occurred. Please try again.");
     }
 
@@ -105,7 +107,6 @@ export default function SignIn({ onSwitch }) {
     <div>
       <p className="a4a-intro a4a-intro--lg">Welcome back! Sign in to continue making a difference.</p>
 
-      {/* FIX [6]: Add autoComplete attributes for password managers and security scanners */}
       <Field label="Username" error={null}>
         <TextInput
           value={username}
@@ -126,7 +127,6 @@ export default function SignIn({ onSwitch }) {
         />
       </Field>
 
-      {/* FIX [3]: error is always a string, safe to render directly */}
       {error && <p className="a4a-err">{error}</p>}
 
       <button
