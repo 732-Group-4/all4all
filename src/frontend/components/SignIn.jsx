@@ -5,6 +5,12 @@ import TextInput from "./shared/TextInput";
 
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_MS = 30_000; 
+const TOKEN_RE = /^[A-Za-z0-9\-_.]+$/;
+
+function sanitizeId(raw) {
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
 
 export default function SignIn({ onSwitch }) {
   const navigate = useNavigate();
@@ -65,13 +71,10 @@ export default function SignIn({ onSwitch }) {
 
       const data = await res.json();
 
-      // Sanitize token — must be a non-empty string containing only safe
-      // base64url / JWT characters (letters, digits, _, -, .)
       const TOKEN_RE = /^[A-Za-z0-9\-_.]+$/;
       const rawToken = typeof data.token === "string" ? data.token.trim() : "";
       const safeToken = TOKEN_RE.test(rawToken) ? rawToken : null;
 
-      // Sanitize each user field individually
       const ALLOWED_ROLES = new Set(["VOLUNTEER", "ORGANIZATION"]);
       const rawUser = data.user ?? {};
       const safeUser = {
@@ -81,16 +84,17 @@ export default function SignIn({ onSwitch }) {
         role: ALLOWED_ROLES.has(rawUser.role) ? rawUser.role : null,
       };
 
-      if (!safeToken || !safeUser.id || !safeUser.role) {
+      const safeId = sanitizeId(rawUser.id);
+
+      if (!safeToken || !safeId || !safeUser.role) {
         setError("Sign in failed. Please try again.");
         setLoading(false);
         return;
       }
 
-      // Write only fully-validated, explicitly-constructed primitives to storage
       localStorage.setItem("token", safeToken);
       localStorage.setItem("user", JSON.stringify({
-        id: safeUser.id,
+        id: safeId,
         username: safeUser.username,
         email: safeUser.email,
         role: safeUser.role,

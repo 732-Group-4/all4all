@@ -44,6 +44,7 @@ const API_ROUTES = {
   volunteerBadges: (id) => `/api/volunteers/${id}/badges`,
   serviceHours: (id) => `/api/volunteers/${id}/service-hours`,
   orgEventStats: (id) => `/api/organizations/${id}/event-stats`,
+  userAvatar: (id) => `/api/users/${id}/avatar`,
 };
 
 function buildUrl(routeKey, id) {
@@ -542,7 +543,7 @@ export default function ProfilePage() {
           const blob = await fetch(form.avatar).then(r => r.blob());
           const fd = new FormData();
           fd.append("image", blob, "avatar.jpg");
-          const r = await fetch(`/api/users/${user.id}/avatar`, { method: "POST", body: fd });
+          const r = await fetch(buildUrl("userAvatar", user.id), { method: "POST", body: fd });
           const { image_url } = await r.json();
           updated.image_url = image_url;
         }
@@ -555,7 +556,7 @@ export default function ProfilePage() {
           const blob = await fetch(form.avatar).then(r => r.blob());
           const fd = new FormData();
           fd.append("image", blob, "avatar.jpg");
-          const r = await fetch(`/api/users/${user.id}/avatar`, { method: "POST", body: fd });
+          const r = await fetch(buildUrl("userAvatar", user.id), { method: "POST", body: fd });
           const { image_url } = await r.json();
           updated.image_url = image_url;
         }
@@ -567,12 +568,15 @@ export default function ProfilePage() {
     // FIX [1] & [2]: Only store non-sensitive display fields in localStorage.
     // Role, permissions, and identity must always be re-verified server-side.
     const safeUserCache = {
-      id: updated.id,
-      username: updated.username,
-      email: updated.email,
-      role: updated.role,
-      image_url: updated.image_url,
+      id: sanitizeId(updated.id),
+      username: typeof updated.username === "string" ? updated.username.trim().replace(/[<>"']/g, "") : "",
+      email: typeof updated.email === "string" ? updated.email.trim().replace(/[<>"']/g, "") : "",
+      role: ["VOLUNTEER", "ORGANIZATION"].includes(updated.role) ? updated.role : null,
+      image_url: typeof updated.image_url === "string" ? updated.image_url.trim() : null,
     };
+
+    if (!safeUserCache.id || !safeUserCache.role) return; // don't persist invalid state
+
     localStorage.setItem("user", JSON.stringify(safeUserCache));
     setUser(updated);
     setNewPass(""); setConfirmPass("");
