@@ -94,8 +94,12 @@ export default function SignIn({ onSwitch }) {
       localStorage.setItem("token", safeToken);
       localStorage.setItem("user", JSON.stringify({
         id: safeId,
-        username: safeUser.username,
-        email: safeUser.email,
+        username: typeof rawUser.username === "string"
+          ? rawUser.username.trim().replace(/[^A-Za-z0-9._@-]/g, "")
+          : "",
+        email: typeof rawUser.email === "string"
+          ? rawUser.email.trim().replace(/[^A-Za-z0-9.@_+-]/g, "")
+          : "",
         role: safeUser.role,
       }));
 

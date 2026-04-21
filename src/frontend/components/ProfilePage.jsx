@@ -527,9 +527,13 @@ export default function ProfilePage() {
     const errs = validate();
     if (Object.keys(errs).length) { setErrors(errs); return; }
 
-    // Sanitize user.id once here — used for all fetch calls below
     const safeUid = sanitizeId(user.id);
     if (!safeUid) return;
+
+    // Extract avatar independently — validated as a data URL before use in fetch
+    const AVATAR_RE = /^data:image\/(jpeg|png|gif|webp);base64,[A-Za-z0-9+/=]+$/;
+    const rawAvatar = form.avatar ?? "";
+    const safeAvatar = typeof rawAvatar === "string" && AVATAR_RE.test(rawAvatar) ? rawAvatar : null;
 
     const updated = { ...form };
     if (newPass) updated.password = newPass;
@@ -541,8 +545,8 @@ export default function ProfilePage() {
           method: "PUT", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ user_id: safeUid, firstName: form.firstName, lastName: form.lastName, zip_code: form.zip_code }),
         });
-        if (form.avatar && form.avatar.startsWith("data:")) {
-          const blob = await fetch(form.avatar).then(r => r.blob());
+        if (safeAvatar) {
+          const blob = await fetch(safeAvatar).then(r => r.blob());
           const fd = new FormData();
           fd.append("image", blob, "avatar.jpg");
           const r = await fetch(buildUrl("userAvatar", safeUid), { method: "POST", body: fd });
@@ -554,8 +558,8 @@ export default function ProfilePage() {
           method: "PUT", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ user_id: safeUid, name: form.name, address: form.address, zip_code: form.zip_code, motto: form.motto, brand_colors: form.colors || [] }),
         });
-        if (form.avatar && form.avatar.startsWith("data:")) {
-          const blob = await fetch(form.avatar).then(r => r.blob());
+        if (safeAvatar) {
+          const blob = await fetch(safeAvatar).then(r => r.blob());
           const fd = new FormData();
           fd.append("image", blob, "avatar.jpg");
           const r = await fetch(buildUrl("userAvatar", safeUid), { method: "POST", body: fd });
@@ -567,8 +571,6 @@ export default function ProfilePage() {
       // FIX [5]: Don't log internal save errors to console
     }
 
-    // FIX [1] & [2]: Only store non-sensitive display fields in localStorage.
-    // Role, permissions, and identity must always be re-verified server-side.
     const safeUserCache = {
       id: safeUid,
       username: typeof updated.username === "string" ? updated.username.trim().replace(/[<>"']/g, "") : "",
