@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import supertest from "supertest";
+import fs from "fs";
 
 // Mock the database module before importing the app
 vi.mock("../backend/db.js", () => {
@@ -478,7 +479,7 @@ describe("POST /api/roles/:id/register", () => {
   });
 
   it("returns 404 when role does not exist", async () => {
-    mockClient({ rows: [] }); // no role found
+    mockClient({ rows: [] }); 
 
     const res = await request.post("/api/roles/999/register").send({ volunteer_id: 10 });
     expect(res.status).toBe(404);
@@ -879,35 +880,6 @@ describe("GET /api/eventCategories", () => {
     const res = await request.get("/api/eventCategories");
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
-  });
-});
-
-describe("GET /api/full_name", () => {
-  it("returns full name for a volunteer user", async () => {
-    pool.query.mockResolvedValueOnce({ rowCount: 1, rows: [{ full_name: "Jane Doe" }] });
-
-    const res = await request.get("/api/full_name").query({ user_id: 1 });
-    expect(res.status).toBe(200);
-    expect(res.body.name).toBe("Jane Doe");
-  });
-
-  it("returns name for an org user when volunteer lookup fails", async () => {
-    pool.query
-      .mockResolvedValueOnce({ rowCount: 0, rows: [] })
-      .mockResolvedValueOnce({ rowCount: 1, rows: [{ name: "Test Org" }] });
-
-    const res = await request.get("/api/full_name").query({ user_id: 2 });
-    expect(res.status).toBe(200);
-    expect(res.body.name).toBe("Test Org");
-  });
-
-  it("returns 404 when user is not found", async () => {
-    pool.query
-      .mockResolvedValueOnce({ rowCount: 0, rows: [] })
-      .mockResolvedValueOnce({ rowCount: 0, rows: [] });
-
-    const res = await request.get("/api/full_name").query({ user_id: 999 });
-    expect(res.status).toBe(404);
   });
 });
 
@@ -1324,20 +1296,6 @@ describe("500 error handling", () => {
     expect(res.status).toBe(500);
   });
 
-  it("GET /api/organizations/motto returns 500 on db error", async () => {
-    pool.query.mockRejectedValueOnce(new Error("Database error"));
-
-    const res = await request.get("/api/organizations/motto").query({ user_id: 1 });
-    expect(res.status).toBe(500);
-  });
-
-  it("GET /api/organizations/brand_colors returns 500 on db error", async () => {
-    pool.query.mockRejectedValueOnce(new Error("Database error"));
-
-    const res = await request.get("/api/organizations/brand_colors").query({ user_id: 1 });
-    expect(res.status).toBe(500);
-  });
-
   it("GET /api/organizations/buisnessname returns 500 on db error", async () => {
     pool.query.mockRejectedValueOnce(new Error("Database error"));
 
@@ -1352,85 +1310,73 @@ describe("500 error handling", () => {
     expect(res.status).toBe(500);
   });
 
-  it("GET /api/organizations/motto returns 500 on db error", async () => {
+  it("GET /api/organizations/address returns address", async () => {
+    pool.query.mockResolvedValueOnce({ rowCount: 1, rows: [{ address: "123 Main St" }] });
+
+    const res = await request.get("/api/organizations/address").query({ user_id: 1 });
+    expect(res.status).toBe(200);
+    expect(res.body.address).toBe("123 Main St");
+  });
+
+  it("POST /api/badges returns 400 when file is not PNG", async () => {
+    const res = await request
+      .post("/api/badges")
+      .attach("image", Buffer.from("fake jpg data"), { filename: "test.jpg", contentType: "image/jpeg" })
+      .field("name", "Test Badge")
+      .field("description", "A badge");
+
+    expect(res.status).toBeGreaterThanOrEqual(400);
+  });
+
+  it("POST /api/badges returns 500 on db error", async () => {
     pool.query.mockRejectedValueOnce(new Error("Database error"));
 
+    const res = await request
+      .post("/api/badges")
+      .attach("image", Buffer.from("fake png data"), { filename: "test.png", contentType: "image/png" })
+      .field("name", "Test Badge")
+      .field("description", "A badge");
+
+    expect(res.status).toBe(500);
+  });
+
+  it("POST /api/events/:id/tags inserts tag when category exists", async () => {
+    const client = mockClient(
+      { rows: [] },           // DELETE existing links
+      { rows: [{ id: 1 }] }, // SELECT category — found
+      { rows: [] }            // INSERT into event_category_links
+    );
+
+    const res = await request.post("/api/events/1/tags").send({ tags: ["Environment"] });
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(client.release).toHaveBeenCalled();
+  });
+
+  it("GET /api/organizations/buisnessname returns name", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [{ name: "Test Org" }] });
+
+    const res = await request.get("/api/organizations/buisnessname").query({ user_id: 1 });
+    expect(res.status).toBe(200);
+    expect(res.body.name).toBe("Test Org");
+  });
+  it("GET /api/organizations/motto returns 500 on db error", async () => {
+    pool.query.mockRejectedValueOnce(new Error("Database error"));
     const res = await request.get("/api/organizations/motto").query({ user_id: 1 });
     expect(res.status).toBe(500);
   });
 
   it("GET /api/organizations/brand_colors returns 500 on db error", async () => {
     pool.query.mockRejectedValueOnce(new Error("Database error"));
-
     const res = await request.get("/api/organizations/brand_colors").query({ user_id: 1 });
     expect(res.status).toBe(500);
   });
 
-  it("GET /api/organizations/address returns address", async () => {
-  pool.query.mockResolvedValueOnce({ rowCount: 1, rows: [{ address: "123 Main St" }] });
-
-  const res = await request.get("/api/organizations/address").query({ user_id: 1 });
-  expect(res.status).toBe(200);
-  expect(res.body.address).toBe("123 Main St");
-});
-
-it("GET /api/organizations/motto returns motto", async () => {
-  pool.query.mockResolvedValueOnce({ rowCount: 1, rows: [{ description: "Helping the community" }] });
-
-  const res = await request.get("/api/organizations/motto").query({ user_id: 1 });
-  expect(res.status).toBe(200);
-  expect(res.body.motto).toBe("Helping the community");
-});
-
-it("GET /api/organizations/brand_colors returns colors", async () => {
-  pool.query.mockResolvedValueOnce({ rowCount: 1, rows: [{ brand_colors: ["#15803d"] }] });
-
-  const res = await request.get("/api/organizations/brand_colors").query({ user_id: 1 });
-  expect(res.status).toBe(200);
-  expect(res.body.colors).toEqual(["#15803d"]);
-});
-it("POST /api/badges returns 400 when file is not PNG", async () => {
-  const res = await request
-    .post("/api/badges")
-    .attach("image", Buffer.from("fake jpg data"), { filename: "test.jpg", contentType: "image/jpeg" })
-    .field("name", "Test Badge")
-    .field("description", "A badge");
-
-  expect(res.status).toBeGreaterThanOrEqual(400);
-});
-
-it("POST /api/badges returns 500 on db error", async () => {
-  pool.query.mockRejectedValueOnce(new Error("Database error"));
-
-  const res = await request
-    .post("/api/badges")
-    .attach("image", Buffer.from("fake png data"), { filename: "test.png", contentType: "image/png" })
-    .field("name", "Test Badge")
-    .field("description", "A badge");
-
-  expect(res.status).toBe(500);
-});
-
-it("POST /api/events/:id/tags inserts tag when category exists", async () => {
-  const client = mockClient(
-    { rows: [] },           // DELETE existing links
-    { rows: [{ id: 1 }] }, // SELECT category — found
-    { rows: [] }            // INSERT into event_category_links
-  );
-
-  const res = await request.post("/api/events/1/tags").send({ tags: ["Environment"] });
-  expect(res.status).toBe(200);
-  expect(res.body.success).toBe(true);
-  expect(client.release).toHaveBeenCalled();
-});
-
-it("GET /api/organizations/buisnessname returns name", async () => {
-  pool.query.mockResolvedValueOnce({ rows: [{ name: "Test Org" }] });
-
-  const res = await request.get("/api/organizations/buisnessname").query({ user_id: 1 });
-  expect(res.status).toBe(200);
-  expect(res.body.name).toBe("Test Org");
-});
+  it("GET /api/organizations/profile returns 500 on db error", async () => {
+    pool.query.mockRejectedValueOnce(new Error("Database error"));
+    const res = await request.get("/api/organizations/profile").query({ user_id: 1 });
+    expect(res.status).toBe(500);
+  });
 });
 
 
@@ -1448,5 +1394,73 @@ describe("POST /api/badges", () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty("name", "Test Badge");
+  });
+});
+
+it("POST /api/upload_image returns 500 on error", async () => {
+  const res = await request
+    .post("/api/upload_image")
+    .field("uploadType", "user")
+    .field("userId", "123");
+  // no file attached — req.file will be undefined, causing a throw
+  expect(res.status).toBeGreaterThanOrEqual(400);
+});
+
+describe("GET /api/organizations/motto", () => {
+  it("returns motto for an organization", async () => {
+    pool.query.mockResolvedValueOnce({ rowCount: 1, rows: [{ description: "Helping all" }] });
+
+    const res = await request.get("/api/organizations/motto").query({ user_id: 1 });
+    expect(res.status).toBe(200);
+    expect(res.body.motto).toBe("Helping all");
+  });
+
+  it("returns 404 when org not found", async () => {
+    pool.query.mockResolvedValueOnce({ rowCount: 0, rows: [] });
+
+    const res = await request.get("/api/organizations/motto").query({ user_id: 999 });
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("GET /api/organizations/brand_colors", () => {
+  it("returns brand colors for an organization", async () => {
+    pool.query.mockResolvedValueOnce({ rowCount: 1, rows: [{ brand_colors: ["#15803d"] }] });
+
+    const res = await request.get("/api/organizations/brand_colors").query({ user_id: 1 });
+    expect(res.status).toBe(200);
+    expect(res.body.colors).toEqual(["#15803d"]);
+  });
+
+  it("returns 404 when org not found", async () => {
+    pool.query.mockResolvedValueOnce({ rowCount: 0, rows: [] });
+
+    const res = await request.get("/api/organizations/brand_colors").query({ user_id: 999 });
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("GET /api/organizations/profile", () => {
+  it("returns profile for an organization", async () => {
+    pool.query.mockResolvedValueOnce({
+      rowCount: 1,
+      rows: [{ name: "Test Org", address: "123 Main", zip_code: "14604", motto: "Helping all", brand_colors: ["#15803d"] }],
+    });
+
+    const res = await request.get("/api/organizations/profile").query({ user_id: 1 });
+    expect(res.status).toBe(200);
+    expect(res.body.name).toBe("Test Org");
+  });
+
+  it("returns 400 when user_id is missing", async () => {
+    const res = await request.get("/api/organizations/profile");
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 404 when org not found", async () => {
+    pool.query.mockResolvedValueOnce({ rowCount: 0, rows: [] });
+
+    const res = await request.get("/api/organizations/profile").query({ user_id: 999 });
+    expect(res.status).toBe(404);
   });
 });

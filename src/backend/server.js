@@ -6,11 +6,14 @@ import jwt from "jsonwebtoken";
 import multer from "multer";
 import path from "path";
 import { fileURLToPath } from "url";
-import { dirname } from "path";
+import { dirname,join, resolve } from "path";
+import fs from "fs";
+import { existsSync, readdirSync } from "fs";
 
 dotenv.config();
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const app = express();
 app.use(express.json());
@@ -18,39 +21,51 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // ─── Shared Helpers ───────────────────────────────────────────────────────────
 
-/** Centralised error handler — eliminates repeated catch blocks */
 function handleError(res, err) {
   console.error(err);
   if (err.code === "23505") return res.status(409).json({ error: "Already exists" });
   res.status(500).send("Database error");
 }
 
-/** Run a callback with a checked-out pool client, always releasing it */
-async function withClient(fn) {
+async function withTransaction(fn) {
   const client = await pool.connect();
   try {
-    return await fn(client);
+    await client.query("BEGIN");
+    const result = await fn(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
   } finally {
     client.release();
   }
 }
 
-/** Run a callback inside a BEGIN/COMMIT transaction, rolling back on error */
-async function withTransaction(fn) {
-  return withClient(async (client) => {
-    await client.query("BEGIN");
-    try {
-      const result = await fn(client);
-      await client.query("COMMIT");
-      return result;
-    } catch (err) {
-      await client.query("ROLLBACK");
-      throw err;
-    }
-  });
-}
-
 // ─── Multer Setup ─────────────────────────────────────────────────────────────
+
+// ---- image helpers ------
+const imageUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      const { uploadType, userId } = req.body;
+      const dir = join(__dirname, "uploads", uploadType, userId);
+      fs.mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
+    filename: (req, file, cb) => cb(null, `image_${Date.now()}${path.extname(file.originalname)}`),
+  }),
+});
+
+app.post("/api/upload_image", imageUpload.single("file"), (req, res) => {
+  try {
+    const { uploadType, userId } = req.body;
+    const fileUrl = `/uploads/${uploadType}/${userId}/${req.file.filename}`;
+    res.json({ url: fileUrl });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
 
 const profileUpload = multer({
   storage: multer.diskStorage({
@@ -72,10 +87,6 @@ const badgeUpload = multer({
 
 // ─── User / Auth ──────────────────────────────────────────────────────────────
 
-/**
- * Create a base user account.
- * Handles overlapping login logic between volunteers and organizations.
- */
 async function createUser(client, username, email, password, phone, role) {
   const hashed = await bcrypt.hash(password, 10);
   const result = await client.query(
@@ -92,11 +103,9 @@ app.post("/api/login", async (req, res) => {
       "SELECT id, email, password_hash, role FROM users WHERE username = $1 LIMIT 1",
       [username]
     );
-
     if (result.rowCount === 0 || !(await bcrypt.compare(password, result.rows[0].password_hash))) {
       return res.status(401).send("Invalid email or password.");
     }
-
     const { id, email, role } = result.rows[0];
     const token = jwt.sign({ id, email, role }, process.env.JWT_SECRET, { expiresIn: "7d" });
     res.json({ token, user: { id, username, email, role } });
@@ -109,7 +118,6 @@ app.get("/api/checkEmail", async (req, res) => {
   try {
     const { email } = req.query;
     if (!email) return res.status(400).json({ error: "Email required" });
-
     const result = await pool.query("SELECT 1 FROM users WHERE email = $1 LIMIT 1", [email]);
     res.json({ available: result.rowCount === 0 });
   } catch (err) {
@@ -121,53 +129,21 @@ app.get("/api/checkEmail", async (req, res) => {
 
 app.post("/api/registerVolunteer", async (req, res) => {
   const { username, email, password, firstName, lastName, phone } = req.body;
-
   if (!username || !email || !password || !firstName || !lastName) {
     return res.status(400).json({ error: "Missing required fields" });
   }
-
   try {
-    const volunteerId = await withTransaction(async (client) => {
-      const user_id = await createUser(client, username, email, password, phone, "VOLUNTEER");
-      const result = await client.query(
-        "INSERT INTO volunteers(user_id,full_name) VALUES($1,$2) RETURNING id",
-        [user_id, `${firstName} ${lastName}`]
-      );
-      return result.rows[0].id;
-    });
-
-    res.json({ id: volunteerId });
+    const { volunteerId, userId } = await withTransaction(async (client) => {
+    const user_id = await createUser(client, username, email, password, phone, "VOLUNTEER");
+    const result = await client.query(
+      "INSERT INTO volunteers(user_id,full_name) VALUES($1,$2) RETURNING id",
+      [user_id, `${firstName} ${lastName}`]
+    );
+    return { volunteerId: result.rows[0].id, userId: user_id };
+  });
+  res.json({ id: volunteerId, user_id: userId });
   } catch (err) {
     if (err.code === "23505") return res.status(409).json({ error: "User already exists" });
-    handleError(res, err);
-  }
-});
-
-app.get("/api/volunteers/:id", async (req, res) => {
-  try {
-    const result = await pool.query(
-      `SELECT v.id, v.full_name, u.email, u.phone_number
-       FROM volunteers v
-       JOIN users u ON u.id = v.user_id
-       WHERE v.user_id = $1`,
-      [req.params.id]
-    );
-    if (result.rowCount === 0) return res.status(404).json({ error: "Volunteer not found" });
-    res.json(result.rows[0]);
-  } catch (err) {
-    handleError(res, err);
-  }
-});
-
-app.put("/api/volunteers/profile", async (req, res) => {
-  try {
-    const { user_id, firstName, lastName, zip_code } = req.body;
-    await pool.query(
-      "UPDATE volunteers SET full_name = $1, zip_code = $2 WHERE user_id = $3",
-      [`${firstName} ${lastName}`, zip_code, user_id]
-    );
-    res.json({ success: true });
-  } catch (err) {
     handleError(res, err);
   }
 });
@@ -277,12 +253,41 @@ app.get("/api/volunteers/:id/service-hours", async (req, res) => {
   }
 });
 
+// NOTE: keep AFTER all static-segment /api/volunteers/... routes
+app.get("/api/volunteers/:id", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT v.id, v.full_name, u.email, u.phone_number
+       FROM volunteers v
+       JOIN users u ON u.id = v.user_id
+       WHERE v.user_id = $1`,
+      [req.params.id]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: "Volunteer not found" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.put("/api/volunteers/profile", async (req, res) => {
+  try {
+    const { user_id, firstName, lastName, zip_code } = req.body;
+    await pool.query(
+      "UPDATE volunteers SET full_name = $1, zip_code = $2 WHERE user_id = $3",
+      [`${firstName} ${lastName}`, zip_code, user_id]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
 // ─── Organization Registration & Profile ──────────────────────────────────────
 
 app.post("/api/registerOrg", async (req, res) => {
   try {
     const { username, name, email, phone, description, password, category_id, zip_code, address, brand_colors } = req.body;
-
     const orgId = await withTransaction(async (client) => {
       const user_id = await createUser(client, username, email, password, phone, "ORGANIZATION");
       const result = await client.query(
@@ -291,7 +296,6 @@ app.post("/api/registerOrg", async (req, res) => {
       );
       return result.rows[0].id;
     });
-
     res.json({ id: orgId });
   } catch (err) {
     if (err.code === "23505") return res.status(409).json({ error: "Email already exists" });
@@ -299,12 +303,56 @@ app.post("/api/registerOrg", async (req, res) => {
   }
 });
 
-/** Consolidated org profile endpoint — replaces the separate name/address/motto/brand_colors routes */
+app.get("/api/organizations/zip_code", async (req, res) => {
+  try {
+    const { user_id } = req.query;
+    if (!user_id) return res.status(400).json({ zip_code: null });
+    const result = await pool.query("SELECT zip_code FROM organizations WHERE user_id = $1", [user_id]);
+    if (result.rowCount === 0) return res.status(404).json({ zip_code: null });
+    res.json({ zip_code: result.rows[0].zip_code ?? null });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.get("/api/organizations/address", async (req, res) => {
+  try {
+    const { user_id } = req.query;
+    const result = await pool.query("SELECT address FROM organizations WHERE user_id = $1", [user_id]);
+    if (result.rowCount === 0) return res.status(404).json({ address: null });
+    res.json({ address: result.rows[0].address });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.get("/api/organizations/motto", async (req, res) => {
+  try {
+    const { user_id } = req.query;
+    const result = await pool.query("SELECT description FROM organizations WHERE user_id = $1", [user_id]);
+    if (result.rowCount === 0) return res.status(404).json({ motto: null });
+    res.json({ motto: result.rows[0].description });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.get("/api/organizations/brand_colors", async (req, res) => {
+  try {
+    const { user_id } = req.query;
+    const result = await pool.query("SELECT brand_colors FROM organizations WHERE user_id = $1", [user_id]);
+    if (result.rowCount === 0) return res.status(404).json({ colors: [] });
+    res.json({ colors: result.rows[0]?.brand_colors || [] });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+/** Consolidated org profile endpoint for frontend use */
 app.get("/api/organizations/profile", async (req, res) => {
   try {
     const { user_id } = req.query;
     if (!user_id) return res.status(400).json({ error: "user_id required" });
-
     const result = await pool.query(
       "SELECT name, address, zip_code, description AS motto, brand_colors FROM organizations WHERE user_id = $1",
       [user_id]
@@ -329,42 +377,11 @@ app.put("/api/organizations/profile", async (req, res) => {
   }
 });
 
-app.get("/api/organizations/zip_code", async (req, res) => {
-  try {
-    const { user_id } = req.query;
-    if (!user_id) return res.status(400).json({ zip_code: null });
-    const result = await pool.query("SELECT zip_code FROM organizations WHERE user_id = $1", [user_id]);
-    if (result.rowCount === 0) return res.status(404).json({ zip_code: null });
-    res.json({ zip_code: result.rows[0].zip_code ?? null });
-  } catch (err) {
-    handleError(res, err);
-  }
-});
-
 app.get("/api/organizations/by-user/:userId", async (req, res) => {
   try {
     const result = await pool.query("SELECT * FROM organizations WHERE user_id = $1", [req.params.userId]);
     if (result.rowCount === 0) return res.status(404).send("Not found");
     res.json(result.rows[0]);
-  } catch (err) {
-    handleError(res, err);
-  }
-});
-
-app.get("/api/organizations/:id", async (req, res) => {
-  try {
-    const result = await pool.query("SELECT * FROM organizations WHERE id = $1", [req.params.id]);
-    if (result.rowCount === 0) return res.status(404).json({ error: "Organization not found" });
-    res.json(result.rows[0]);
-  } catch (err) {
-    handleError(res, err);
-  }
-});
-
-app.get("/api/orgCategories", async (req, res) => {
-  try {
-    const result = await pool.query("SELECT * FROM org_categories");
-    res.json(result.rows);
   } catch (err) {
     handleError(res, err);
   }
@@ -399,7 +416,7 @@ app.get("/api/organizations/:id/event-stats", async (req, res) => {
   }
 });
 
-// NOTE: Keep this route AFTER all /api/organizations/... static-segment routes
+// NOTE: keep AFTER all static-segment /api/organizations/... routes
 app.get("/api/organizations/:id/events", async (req, res) => {
   try {
     const { publishedOnly } = req.query;
@@ -415,8 +432,27 @@ app.get("/api/organizations/:id/events", async (req, res) => {
     const params = [req.params.id];
     if (publishedOnly === "true") query += " AND e.status = 'PUBLISHED'";
     query += " GROUP BY e.id, o.name ORDER BY e.start_time";
-
     const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// NOTE: keep AFTER all static-segment /api/organizations/... routes
+app.get("/api/organizations/:id", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM organizations WHERE id = $1", [req.params.id]);
+    if (result.rowCount === 0) return res.status(404).json({ error: "Organization not found" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.get("/api/orgCategories", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM org_categories");
     res.json(result.rows);
   } catch (err) {
     handleError(res, err);
@@ -464,16 +500,15 @@ app.post("/api/users/:id/avatar", profileUpload.single("image"), async (req, res
 
 app.post("/api/events", async (req, res) => {
   const { organization_id, name, description, start_time, end_time, address, city, state, zip_code, color, recurrence } = req.body;
-
   if (!organization_id || !name || !description || !start_time || !end_time || !zip_code) {
     return res.status(400).json({ error: "Missing required fields" });
   }
   if (new Date(end_time) <= new Date(start_time)) {
     return res.status(400).json({ error: "end_time must be after start_time" });
   }
-
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    const result = await client.query(
       `INSERT INTO events (organization_id, name, description, start_time, end_time, address, city, state, zip_code, color, recurrence)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
       [organization_id, name, description, start_time, end_time, address, city, state, zip_code, color ?? "#15803d", recurrence || null]
@@ -481,6 +516,8 @@ app.post("/api/events", async (req, res) => {
     res.json({ id: result.rows[0].id });
   } catch (err) {
     handleError(res, err);
+  } finally {
+    client.release();
   }
 });
 
@@ -563,13 +600,11 @@ app.post("/api/events/:id/register", async (req, res) => {
   try {
     const { volunteer_id } = req.body;
     const event_id = req.params.id;
-
     const eventResult = await pool.query("SELECT status FROM events WHERE id = $1", [event_id]);
     if (eventResult.rowCount === 0) return res.status(404).json({ error: "Event not found" });
     if (eventResult.rows[0].status !== "PUBLISHED") {
       return res.status(400).json({ error: "Event is not open for registration" });
     }
-
     await pool.query(
       "INSERT INTO event_registrations(event_id, volunteer_id) VALUES ($1, $2)",
       [event_id, volunteer_id]
@@ -626,9 +661,10 @@ app.get("/api/events/:id/registrations/count", async (req, res) => {
 });
 
 app.post("/api/events/:id/checkin", async (req, res) => {
+  const client = await pool.connect();
   try {
     const { volunteer_id, time_in, time_out } = req.body;
-    await pool.query(
+    await client.query(
       `UPDATE event_registrations
        SET attended = true, time_in = $1, time_out = $2
        WHERE event_id = $3 AND volunteer_id = $4`,
@@ -637,28 +673,31 @@ app.post("/api/events/:id/checkin", async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     handleError(res, err);
+  } finally {
+    client.release();
   }
 });
 
 // ─── Event Roles ──────────────────────────────────────────────────────────────
 
 app.post("/api/events/:id/roles", async (req, res) => {
+  const client = await pool.connect();
   try {
-    await withClient(async (client) => {
-      const { roles } = req.body;
-      const event_id = req.params.id;
-      await client.query("DELETE FROM event_roles WHERE event_id = $1", [event_id]);
-      for (const role of roles) {
-        if (!role.name?.trim()) continue;
-        await client.query(
-          "INSERT INTO event_roles(event_id, name, spots) VALUES($1, $2, $3)",
-          [event_id, role.name.trim(), parseInt(role.spots) || 0]
-        );
-      }
-    });
+    const { roles } = req.body;
+    const event_id = req.params.id;
+    await client.query("DELETE FROM event_roles WHERE event_id = $1", [event_id]);
+    for (const role of roles) {
+      if (!role.name?.trim()) continue;
+      await client.query(
+        "INSERT INTO event_roles(event_id, name, spots) VALUES($1, $2, $3)",
+        [event_id, role.name.trim(), parseInt(role.spots) || 0]
+      );
+    }
     res.json({ success: true });
   } catch (err) {
     handleError(res, err);
+  } finally {
+    client.release();
   }
 });
 
@@ -696,37 +735,45 @@ app.get("/api/events/:id/volunteer-role/:volunteerId", async (req, res) => {
 });
 
 app.post("/api/roles/:id/register", async (req, res) => {
+  const client = await pool.connect();
   try {
-    await withClient(async (client) => {
-      const { volunteer_id } = req.body;
-      const role_id = req.params.id;
+    const { volunteer_id } = req.body;
+    const role_id = req.params.id;
 
-      const roleResult = await client.query(
-        `SELECT er.spots, COUNT(err.id) AS filled
-         FROM event_roles er
-         LEFT JOIN event_role_registrations err ON err.role_id = er.id
-         WHERE er.id = $1
-         GROUP BY er.id`,
-        [role_id]
-      );
+    if (!Number.isInteger(Number(role_id)) || isNaN(Number(role_id))) {
+      return res.status(404).json({ error: "Role not found" });
+    }
 
-      if (roleResult.rowCount === 0) throw Object.assign(new Error("Role not found"), { statusCode: 404 });
+    const roleResult = await client.query(
+      `SELECT er.spots, COUNT(err.id) AS filled
+       FROM event_roles er
+       LEFT JOIN event_role_registrations err ON err.role_id = er.id
+       WHERE er.id = $1
+       GROUP BY er.id`,
+      [role_id]
+    );
 
-      const { spots, filled } = roleResult.rows[0];
-      if (parseInt(filled) >= parseInt(spots)) {
-        throw Object.assign(new Error("No spots available"), { statusCode: 400 });
-      }
+    if (roleResult.rowCount === 0 || roleResult.rows.length === 0) {
+      return res.status(404).json({ error: "Role not found" });
+    }
 
-      await client.query(
-        "INSERT INTO event_role_registrations(role_id, volunteer_id) VALUES($1, $2)",
-        [role_id, volunteer_id]
-      );
-    });
-    res.json({ success: true });
+    const { spots, filled } = roleResult.rows[0];
+    if (parseInt(filled) >= parseInt(spots)) {
+      return res.status(400).json({ error: "No spots available" });
+    }
+
+    await client.query(
+      "INSERT INTO event_role_registrations(role_id, volunteer_id) VALUES($1, $2)",
+      [role_id, volunteer_id]
+    );
+    res.json({ success: true});
   } catch (err) {
-    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
     if (err.code === "23505") return res.status(409).json({ error: "Already registered for this role" });
+    if (err.code === "22P02") return res.status(404).json({ error: "Role not found" });
+
     handleError(res, err);
+  } finally {
+    client.release();
   }
 });
 
@@ -763,27 +810,28 @@ app.get("/api/roles/:id/volunteers", async (req, res) => {
 // ─── Event Tags ───────────────────────────────────────────────────────────────
 
 app.post("/api/events/:id/tags", async (req, res) => {
+  const client = await pool.connect();
   try {
-    await withClient(async (client) => {
-      const { tags } = req.body;
-      const event_id = req.params.id;
-      await client.query("DELETE FROM event_category_links WHERE event_id = $1", [event_id]);
-      for (const tagName of tags) {
-        const catResult = await client.query(
-          "SELECT id FROM event_categories WHERE name = $1",
-          [tagName]
+    const { tags } = req.body;
+    const event_id = req.params.id;
+    await client.query("DELETE FROM event_category_links WHERE event_id = $1", [event_id]);
+    for (const tagName of tags) {
+      const catResult = await client.query(
+        "SELECT id FROM event_categories WHERE name = $1",
+        [tagName]
+      );
+      if (catResult.rowCount > 0) {
+        await client.query(
+          "INSERT INTO event_category_links(event_id, event_category_id) VALUES($1,$2)",
+          [event_id, catResult.rows[0].id]
         );
-        if (catResult.rowCount > 0) {
-          await client.query(
-            "INSERT INTO event_category_links(event_id, event_category_id) VALUES($1,$2)",
-            [event_id, catResult.rows[0].id]
-          );
-        }
       }
-    });
+    }
     res.json({ success: true });
   } catch (err) {
     handleError(res, err);
+  } finally {
+    client.release();
   }
 });
 
@@ -842,21 +890,22 @@ app.get("/api/badges", async (req, res) => {
 });
 
 app.post("/api/events/:id/badges", async (req, res) => {
+  const client = await pool.connect();
   try {
-    await withClient(async (client) => {
-      const { badge_ids } = req.body;
-      const event_id = req.params.id;
-      await client.query("DELETE FROM event_badges WHERE event_id = $1", [event_id]);
-      for (const badge_id of badge_ids) {
-        await client.query(
-          "INSERT INTO event_badges(event_id, badge_id) VALUES($1, $2)",
-          [event_id, badge_id]
-        );
-      }
-    });
+    const { badge_ids } = req.body;
+    const event_id = req.params.id;
+    await client.query("DELETE FROM event_badges WHERE event_id = $1", [event_id]);
+    for (const badge_id of badge_ids) {
+      await client.query(
+        "INSERT INTO event_badges(event_id, badge_id) VALUES($1, $2)",
+        [event_id, badge_id]
+      );
+    }
     res.json({ success: true });
   } catch (err) {
     handleError(res, err);
+  } finally {
+    client.release();
   }
 });
 
@@ -872,6 +921,39 @@ app.get("/api/events/:id/badges", async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     handleError(res, err);
+  }
+});
+
+app.get("/api/images/:type/:userId", (req, res) => {
+  try {
+    const { type, userId } = req.params;
+
+    if (!["user", "badge"].includes(type)) {
+      return res.status(400).json({ error: "Invalid image type" });
+    }
+
+    const basePath = join(__dirname, 'uploads');
+    const dirPath = join(basePath, type, userId);
+
+    if (!existsSync(dirPath)) {
+      console.log("Dir doesn't exist");
+      return res.status(404).json({ error: "No images found" });
+    }
+
+    const files = readdirSync(dirPath);
+
+    // filter dotfiles
+    const imageFiles = files.filter(file => !file.startsWith("."));
+
+    const fileUrls = imageFiles.map(file =>
+      `/uploads/${type}/${userId}/${file}`
+    );
+
+    res.json({ images: fileUrls });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to retrieve images" });
   }
 });
 
