@@ -73,6 +73,31 @@ async function mutateOne(res, sql, params, notFoundMsg = "Not found") {
   }
 }
 
+// Acquires a client, runs fn(client), always releases, responds { success: true }
+async function withClient(res, fn) {
+  const client = await pool.connect();
+  try {
+    await fn(client);
+    res.json({ success: true });
+  } catch (err) {
+    handleError(res, err);
+  } finally {
+    client.release();
+  }
+}
+
+// Returns zip_code for a table keyed by user_id
+async function getZipCode(res, table, user_id) {
+  try {
+    if (!user_id) return res.status(400).json({ zip_code: null });
+    const result = await pool.query(`SELECT zip_code FROM ${table} WHERE user_id = $1`, [user_id]);
+    if (result.rowCount === 0) return res.status(404).json({ zip_code: null });
+    res.json({ zip_code: result.rows[0].zip_code ?? null });
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
 // ─── Multer Setup ─────────────────────────────────────────────────────────────
 
 const imageUpload = multer({
@@ -168,17 +193,9 @@ app.post("/api/registerVolunteer", async (req, res) => {
   }
 });
 
-app.get("/api/volunteers/zip_code", async (req, res) => {
-  try {
-    const { user_id } = req.query;
-    if (!user_id) return res.status(400).json({ zip_code: null });
-    const result = await pool.query("SELECT zip_code FROM volunteers WHERE user_id = $1", [user_id]);
-    if (result.rowCount === 0) return res.status(404).json({ zip_code: null });
-    res.json({ zip_code: result.rows[0].zip_code ?? null });
-  } catch (err) {
-    handleError(res, err);
-  }
-});
+app.get("/api/volunteers/zip_code", (req, res) =>
+  getZipCode(res, "volunteers", req.query.user_id)
+);
 
 app.get("/api/volunteers/:id/registrations", (req, res) =>
   queryMany(res,
@@ -298,17 +315,9 @@ app.post("/api/registerOrg", async (req, res) => {
   }
 });
 
-app.get("/api/organizations/zip_code", async (req, res) => {
-  try {
-    const { user_id } = req.query;
-    if (!user_id) return res.status(400).json({ zip_code: null });
-    const result = await pool.query("SELECT zip_code FROM organizations WHERE user_id = $1", [user_id]);
-    if (result.rowCount === 0) return res.status(404).json({ zip_code: null });
-    res.json({ zip_code: result.rows[0].zip_code ?? null });
-  } catch (err) {
-    handleError(res, err);
-  }
-});
+app.get("/api/organizations/zip_code", (req, res) =>
+  getZipCode(res, "organizations", req.query.user_id)
+);
 
 app.get("/api/organizations/address", async (req, res) => {
   try {
@@ -579,19 +588,13 @@ app.post("/api/events/:id/register", async (req, res) => {
   }
 });
 
-app.delete("/api/events/:id/register", async (req, res) => {
-  try {
-    const { volunteer_id } = req.body;
-    const result = await pool.query(
-      "DELETE FROM event_registrations WHERE event_id = $1 AND volunteer_id = $2",
-      [req.params.id, volunteer_id]
-    );
-    if (result.rowCount === 0) return res.status(404).json({ error: "Registration not found" });
-    res.json({ success: true });
-  } catch (err) {
-    handleError(res, err);
-  }
-});
+app.delete("/api/events/:id/register", (req, res) =>
+  mutateOne(res,
+    "DELETE FROM event_registrations WHERE event_id = $1 AND volunteer_id = $2",
+    [req.params.id, req.body.volunteer_id],
+    "Registration not found"
+  )
+);
 
 app.get("/api/events/:id/registrations", (req, res) =>
   queryMany(res,
@@ -618,9 +621,8 @@ app.get("/api/events/:id/registrations/count", async (req, res) => {
   }
 });
 
-app.post("/api/events/:id/checkin", async (req, res) => {
-  const client = await pool.connect();
-  try {
+app.post("/api/events/:id/checkin", (req, res) =>
+  withClient(res, async (client) => {
     const { volunteer_id, time_in, time_out } = req.body;
     await client.query(
       `UPDATE event_registrations
@@ -628,36 +630,24 @@ app.post("/api/events/:id/checkin", async (req, res) => {
        WHERE event_id = $3 AND volunteer_id = $4`,
       [time_in, time_out, req.params.id, volunteer_id]
     );
-    res.json({ success: true });
-  } catch (err) {
-    handleError(res, err);
-  } finally {
-    client.release();
-  }
-});
+  })
+);
 
 // ─── Event Roles ──────────────────────────────────────────────────────────────
 
-app.post("/api/events/:id/roles", async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const { roles } = req.body;
+app.post("/api/events/:id/roles", (req, res) =>
+  withClient(res, async (client) => {
     const event_id = req.params.id;
     await client.query("DELETE FROM event_roles WHERE event_id = $1", [event_id]);
-    for (const role of roles) {
+    for (const role of req.body.roles) {
       if (!role.name?.trim()) continue;
       await client.query(
         "INSERT INTO event_roles(event_id, name, spots) VALUES($1, $2, $3)",
         [event_id, role.name.trim(), parseInt(role.spots) || 0]
       );
     }
-    res.json({ success: true });
-  } catch (err) {
-    handleError(res, err);
-  } finally {
-    client.release();
-  }
-});
+  })
+);
 
 app.get("/api/events/:id/roles", (req, res) =>
   queryMany(res,
@@ -729,19 +719,13 @@ app.post("/api/roles/:id/register", async (req, res) => {
   }
 });
 
-app.delete("/api/roles/:id/register", async (req, res) => {
-  try {
-    const { volunteer_id } = req.body;
-    const result = await pool.query(
-      "DELETE FROM event_role_registrations WHERE role_id = $1 AND volunteer_id = $2",
-      [req.params.id, volunteer_id]
-    );
-    if (result.rowCount === 0) return res.status(404).json({ error: "Registration not found" });
-    res.json({ success: true });
-  } catch (err) {
-    handleError(res, err);
-  }
-});
+app.delete("/api/roles/:id/register", (req, res) =>
+  mutateOne(res,
+    "DELETE FROM event_role_registrations WHERE role_id = $1 AND volunteer_id = $2",
+    [req.params.id, req.body.volunteer_id],
+    "Registration not found"
+  )
+);
 
 app.get("/api/roles/:id/volunteers", (req, res) =>
   queryMany(res,
@@ -756,16 +740,13 @@ app.get("/api/roles/:id/volunteers", (req, res) =>
 
 // ─── Event Tags ───────────────────────────────────────────────────────────────
 
-app.post("/api/events/:id/tags", async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const { tags } = req.body;
+app.post("/api/events/:id/tags", (req, res) =>
+  withClient(res, async (client) => {
     const event_id = req.params.id;
     await client.query("DELETE FROM event_category_links WHERE event_id = $1", [event_id]);
-    for (const tagName of tags) {
+    for (const tagName of req.body.tags) {
       const catResult = await client.query(
-        "SELECT id FROM event_categories WHERE name = $1",
-        [tagName]
+        "SELECT id FROM event_categories WHERE name = $1", [tagName]
       );
       if (catResult.rowCount > 0) {
         await client.query(
@@ -774,13 +755,8 @@ app.post("/api/events/:id/tags", async (req, res) => {
         );
       }
     }
-    res.json({ success: true });
-  } catch (err) {
-    handleError(res, err);
-  } finally {
-    client.release();
-  }
-});
+  })
+);
 
 app.get("/api/events/:id/tags", (req, res) =>
   queryMany(res,
@@ -821,25 +797,18 @@ app.get("/api/badges", (req, res) =>
   queryMany(res, "SELECT * FROM badges ORDER BY id")
 );
 
-app.post("/api/events/:id/badges", async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const { badge_ids } = req.body;
+app.post("/api/events/:id/badges", (req, res) =>
+  withClient(res, async (client) => {
     const event_id = req.params.id;
     await client.query("DELETE FROM event_badges WHERE event_id = $1", [event_id]);
-    for (const badge_id of badge_ids) {
+    for (const badge_id of req.body.badge_ids) {
       await client.query(
         "INSERT INTO event_badges(event_id, badge_id) VALUES($1, $2)",
         [event_id, badge_id]
       );
     }
-    res.json({ success: true });
-  } catch (err) {
-    handleError(res, err);
-  } finally {
-    client.release();
-  }
-});
+  })
+);
 
 app.get("/api/events/:id/badges", (req, res) =>
   queryMany(res,
