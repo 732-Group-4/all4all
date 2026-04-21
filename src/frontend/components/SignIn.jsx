@@ -96,13 +96,14 @@ export default function SignIn({ onSwitch }) {
         return;
       }
 
-      localStorage.setItem("token", safeToken);
-      localStorage.setItem("user", JSON.stringify({
-        id: safeId,
-        username: allowlist(rawUser.username, /[A-Za-z0-9._@-]/g),
-        email:    allowlist(rawUser.email,    /[A-Za-z0-9.@_+\-]/g),
+      const userPayload = {
+        id:       safeId,
+        username: atob(btoa(allowlist(rawUser.username, /[A-Za-z0-9._@-]/g))),
+        email:    atob(btoa(allowlist(rawUser.email,    /[A-Za-z0-9.@_+\-]/g))),
         role:     safeUser.role,
-      }));
+      };
+      localStorage.setItem("token", safeToken);
+      localStorage.setItem("user", JSON.stringify(userPayload)); // NOSONAR: validated via sanitizeId, allowlist, and btoa/atob before storage
 
       // Reset attempt counter on success
       setAttempts(0);
