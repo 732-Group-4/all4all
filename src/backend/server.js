@@ -172,7 +172,11 @@ const profileUpload = multer({
 
 const badgeUpload = multer({
   storage: multer.diskStorage({
-    destination: "uploads/badges/",
+    destination: (req, file, cb) => {
+      const dir = path.join(__dirname, "uploads/profiles/badges");
+      fs.mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
     filename: (req, file, cb) => cb(null, `badge_${Date.now()}${safeExt(file.originalname)}`),
   }),
   fileFilter: (req, file, cb) => {
@@ -875,22 +879,21 @@ app.get("/api/eventCategories", (req, res) =>
 app.post("/api/badges", (req, res, next) => {
   badgeUpload.single("image")(req, res, (err) => {
     if (err) return res.status(400).json({ error: err.message });
-    if (!req.file) return res.status(400).json({ error: "Image file is required" });
-    next();
+      next();
+    });
+  }, async (req, res) => {
+    try {
+      const { name, description } = req.body;
+      const image_url = req.file ? `/uploads/profiles/badges/${req.file.filename}` : null;
+      const result = await pool.query(
+        "INSERT INTO badges(name, description, image_url) VALUES($1,$2,$3) RETURNING *",
+        [name, description, image_url]
+      );
+      res.json(result.rows[0]);
+    } catch (err) {
+      handleError(res, err);
+    }
   });
-}, async (req, res) => {
-  try {
-    const { name, description } = req.body;
-    const image_url = `/uploads/badges/${req.file.filename}`;
-    const result = await pool.query(
-      "INSERT INTO badges(name, description, image_url) VALUES($1,$2,$3) RETURNING *",
-      [name, description, image_url]
-    );
-    res.json(result.rows[0]);
-  } catch (err) {
-    handleError(res, err);
-  }
-});
 
 app.get("/api/badges", (req, res) =>
   queryMany(res, "SELECT * FROM badges ORDER BY id")

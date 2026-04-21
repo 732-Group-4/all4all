@@ -711,11 +711,13 @@ function EventModal({ event, orgId, brandColors = [], onClose, onSaved }) {
         body: JSON.stringify({ tags: [...selectedTags] }),
       });
 
-      await fetch(`/api/events/${eventId}/badges`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ badge_ids: [...selectedBadges] }),
-      });
+      if (selectedBadges.size > 0) {
+        await fetch(`/api/events/${eventId}/badges`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ badge_ids: [...selectedBadges] }),
+        });
+      }
 
       onSaved({
         ...form,
@@ -1052,17 +1054,29 @@ function EventModal({ event, orgId, brandColors = [], onClose, onSaved }) {
                   </div>
                   <button
                     onClick={async () => {
-                      if (!newBadgeName.trim()) return;
-                      const fd = new FormData();
-                      fd.append("name", newBadgeName);
-                      fd.append("description", newBadgeDesc);
-                      if (newBadgeFile) fd.append("image", newBadgeFile);
-                      const res = await fetch("/api/badges", { method: "POST", body: fd });
-                      const badge = await res.json();
-                      setAvailableBadges(prev => [...prev, badge]);
-                      setSelectedBadges(prev => new Set([...prev, badge.id]));
-                      setNewBadgeName(""); setNewBadgeDesc(""); setNewBadgeFile(null);
-                    }}
+                        if (!newBadgeName.trim()) return;
+                        const fd = new FormData();
+                        fd.append("name", newBadgeName);
+                        fd.append("description", newBadgeDesc);
+                        if (newBadgeFile) fd.append("image", newBadgeFile);
+
+                        try {
+                          const res = await fetch("/api/badges", { method: "POST", body: fd });
+                          if (!res.ok) throw new Error(`Badge creation failed: ${res.status}`);
+                          const badge = await res.json();
+                          console.log("Badge response:", badge);
+                          if (!badge?.id) throw new Error("No badge ID returned");
+                          setAvailableBadges(prev => [...prev, badge]);
+                          setSelectedBadges(prev => new Set([...prev, badge.id]));
+                          setNewBadgeName("");
+                          setNewBadgeDesc("");
+                          setNewBadgeFile(null);
+                        } catch (err) {
+                          console.error("Badge creation error:", err);
+                          // Optionally surface this to the user via setSubmitErr
+                          setSubmitErr("Failed to create badge. Please try again.");
+                        }
+                      }}
                     style={{
                       background: "#15803d", color: "#fff", border: "none", borderRadius: 8,
                       padding: "8px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
