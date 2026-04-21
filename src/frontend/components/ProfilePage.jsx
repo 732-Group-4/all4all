@@ -102,7 +102,6 @@ function VolunteerServicePanel({ userId }) {
     <div className="prof-section">
       <div className="prof-section-title">⏱ Service Hours</div>
 
-      {/* Summary stat */}
       <div style={{
         background: "linear-gradient(135deg,#15803d,#166534)",
         borderRadius: 14, padding: "16px 20px", color: "#fff",
@@ -119,7 +118,6 @@ function VolunteerServicePanel({ userId }) {
         </div>
       </div>
 
-      {/* Filters */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
         <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={sel}>
           <option value="date">Sort: Date</option>
@@ -142,7 +140,6 @@ function VolunteerServicePanel({ userId }) {
         )}
       </div>
 
-      {/* Rows */}
       {filtered.length === 0 ? (
         <p style={{ fontSize: 13, color: "#94a3b8", textAlign: "center", padding: "24px 0" }}>No service hours recorded yet.</p>
       ) : (
@@ -229,7 +226,6 @@ function OrgServicePanel({ orgId }) {
     <div className="prof-section">
       <div className="prof-section-title">📊 Event Activity</div>
 
-      {/* Summary stats */}
       <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         {[
           { label: "Total Hours", value: fmtHours(totalHours), color: "#15803d", key: "hours" },
@@ -241,8 +237,6 @@ function OrgServicePanel({ orgId }) {
             onClick={() => s.key && setMetric(s.key)}
             role={s.key ? "button" : undefined}
             tabIndex={s.key ? 0 : undefined}
-            // FIX [4]: Removed broken onKeyDown that referenced out-of-scope setShowSettings/setEditing.
-            //          Replaced with correct metric-toggle handler scoped to this component.
             onKeyDown={s.key ? (e => (e.key === "Enter" || e.key === " ") && setMetric(s.key)) : undefined}
             style={{
               background: `linear-gradient(135deg,${s.color},${s.color}cc)`,
@@ -262,7 +256,6 @@ function OrgServicePanel({ orgId }) {
         ))}
       </div>
 
-      {/* Filters */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
         <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={sel}>
           <option value="date">Sort: Date</option>
@@ -289,7 +282,6 @@ function OrgServicePanel({ orgId }) {
         )}
       </div>
 
-      {/* Event rows */}
       {filtered.length === 0 ? (
         <p style={{ fontSize: 13, color: "#94a3b8", textAlign: "center", padding: "24px 0" }}>No events yet.</p>
       ) : (
@@ -333,8 +325,6 @@ function OrgServicePanel({ orgId }) {
                       </div>
                     )}
                   </div>
-
-                  {/* Metric display */}
                   <div style={{ textAlign: "right", flexShrink: 0 }}>
                     {metric === "hours" ? (
                       <>
@@ -362,11 +352,6 @@ function OrgServicePanel({ orgId }) {
 export default function ProfilePage() {
   const navigate = useNavigate();
 
-  // FIX [1] & [2]: Parse localStorage safely. Do NOT trust the role/id from
-  // localStorage for access-control decisions — those must be enforced server-side.
-  // localStorage is used here only as a client-side cache for display; all
-  // privileged API calls must be authenticated via HttpOnly session cookies or
-  // Authorization headers verified by the server, never by the client role field.
   const [user, setUser] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem("user") || "null");
@@ -377,12 +362,14 @@ export default function ProfilePage() {
 
   const [form, setForm] = useState({
     ...user,
-    // FIX [2]: Do not persist avatar (potentially large base64 blob) in localStorage.
-    // Read it from the user object only; saving happens via the API upload endpoint.
-    avatar: user?.avatar || null,
+    // Prefer image_url (server-stored URL) over avatar (local blob), fall back to null
+    avatar: user?.image_url || user?.avatar || null,
   });
 
   const isVolunteer = user?.role === "VOLUNTEER";
+
+  // Compute safeUid once at component level so it's available everywhere
+  const safeUid = sanitizeId(user?.id);
 
   const [showSettings, setShowSettings] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -409,67 +396,80 @@ export default function ProfilePage() {
   const str = getPasswordStrength(newPass);
 
   useEffect(() => {
-    if (!user?.id) return;
-      const uid = sanitizeId(user.id);
-      if (!uid) return;
+    if (!safeUid) return;
 
-      fetch(buildUrl("fullName", uid))
-        .then(r => r.json())
-        .then(data => {
-          setDisplayName(data.name);
-          if (isVolunteer) {
-            const [firstName, ...rest] = data.name.split(" ");
-            setForm(f => ({ ...f, firstName, lastName: rest.join(" ") }));
-          } else {
-            setForm(f => ({ ...f, name: data.name }));
+    fetch(buildUrl("fullName", safeUid))
+      .then(r => r.json())
+      .then(data => {
+        setDisplayName(data.name);
+        if (isVolunteer) {
+          const [firstName, ...rest] = data.name.split(" ");
+          setForm(f => ({ ...f, firstName, lastName: rest.join(" ") }));
+        } else {
+          setForm(f => ({ ...f, name: data.name }));
+        }
+      }).catch(() => {});
+
+    fetch(buildUrl("phone", safeUid))
+      .then(r => r.json())
+      .then(data => setForm(f => ({ ...f, phone: data.phone })))
+      .catch(() => {});
+
+    fetch(buildUrl(isVolunteer ? "volunteerZip" : "orgZip", safeUid))
+      .then(r => r.json())
+      .then(data => setForm(f => ({ ...f, zip_code: data.zip_code || "" })))
+      .catch(() => {});
+
+    // Load existing avatar from server, strip origin so it works via Vite proxy
+    fetch(buildUrl("userAvatar", safeUid))
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.image_url) {
+          let relativeUrl = data.image_url.replace(/^https?:\/\/[^/]+/, "");
+          // Fix old URLs that are missing the user ID folder
+          if (relativeUrl.startsWith("/uploads/profiles/profile_")) {
+            relativeUrl = relativeUrl.replace("/uploads/profiles/", `/uploads/profiles/${safeUid}/`);
           }
-        }).catch(() => {});
+          setForm(f => ({ ...f, avatar: relativeUrl }));
+        }
+      })
+      .catch(() => {});
 
-      fetch(buildUrl("phone", uid))
+    if (!isVolunteer) {
+      fetch(buildUrl("orgByUser", safeUid))
         .then(r => r.json())
-        .then(data => setForm(f => ({ ...f, phone: data.phone })))
+        .then(setOrg)
         .catch(() => {});
 
-      fetch(buildUrl(isVolunteer ? "volunteerZip" : "orgZip", uid))
+      fetch(buildUrl("orgProfile", safeUid))
         .then(r => r.json())
-        .then(data => setForm(f => ({ ...f, zip_code: data.zip_code || "" })))
+        .then(data => setForm(f => ({
+          ...f,
+          address: data.address,
+          motto: data.motto,
+          brand_colors: data.brand_colors || []
+        })))
         .catch(() => {});
+    }
 
-      if (!isVolunteer) {
-        fetch(buildUrl("orgByUser", uid))
-          .then(r => r.json())
-          .then(setOrg)
-          .catch(() => {});
+    if (isVolunteer) {
+      fetch(buildUrl("volunteerRegistrations", safeUid))
+        .then(r => r.json()).then(setRegisteredEvents).catch(() => {});
 
-        fetch(buildUrl("orgProfile", uid))
-          .then(r => r.json())
-          .then(data => setForm(f => ({
-            ...f,
-            address: data.address,
-            motto: data.motto,
-            brand_colors: data.brand_colors || []
-          })))
-          .catch(() => {});
-      }
+      fetch(buildUrl("volunteerPastEvents", safeUid))
+        .then(r => r.json()).then(setPastEvents).catch(() => {});
 
-      if (isVolunteer) {
-        fetch(buildUrl("volunteerRegistrations", uid))
-          .then(r => r.json()).then(setRegisteredEvents).catch(() => {});
-
-        fetch(buildUrl("volunteerPastEvents", uid))
-          .then(r => r.json()).then(setPastEvents).catch(() => {});
-
-        fetch(buildUrl("volunteerById", uid))
-          .then(r => r.json())
-          .then(v => {
-            const vid = sanitizeId(v.id);
-            if (!vid) return;
-            return fetch(buildUrl("volunteerBadges", vid)).then(r => r.json());
-          })
-          .then(badges => { if (badges) setVolunteerBadges(badges); })
-          .catch(() => {});
-      }
-    }, []);
+      fetch(buildUrl("volunteerById", safeUid))
+        .then(r => r.json())
+        .then(v => {
+          const vid = sanitizeId(v.id);
+          if (!vid) return;
+          return fetch(buildUrl("volunteerBadges", vid)).then(r => r.json());
+        })
+        .then(badges => { if (badges) setVolunteerBadges(badges); })
+        .catch(() => {});
+    }
+  }, []);
 
   function set(key, value) {
     setForm(f => ({ ...f, [key]: value }));
@@ -483,13 +483,14 @@ export default function ProfilePage() {
     const img = new Image();
     const url = URL.createObjectURL(file);
     img.onload = () => {
-      const MAX = 100;
+      // Use 400px max so the preview is high enough quality
+      const MAX = 400;
       const scale = Math.min(MAX / img.width, MAX / img.height, 1);
       const canvas = document.createElement("canvas");
       canvas.width = img.width * scale;
       canvas.height = img.height * scale;
       canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
-      set("avatar", canvas.toDataURL("image/jpeg", 0.6));
+      set("avatar", canvas.toDataURL("image/jpeg", 0.85));
       URL.revokeObjectURL(url);
     };
     img.src = url;
@@ -531,11 +532,9 @@ export default function ProfilePage() {
   async function handleSave() {
     const errs = validate();
     if (Object.keys(errs).length) { setErrors(errs); return; }
-
-    const safeUid = sanitizeId(user.id);
     if (!safeUid) return;
 
-    // Extract avatar independently — validated as a data URL before use in fetch
+    // Only upload if avatar is a fresh local data URL (not already a server URL)
     const AVATAR_RE = /^data:image\/(jpeg|png|gif|webp);base64,[A-Za-z0-9+/=]+$/;
     const rawAvatar = form.avatar ?? "";
     const safeAvatar = typeof rawAvatar === "string" && AVATAR_RE.test(rawAvatar) ? rawAvatar : null;
@@ -556,7 +555,10 @@ export default function ProfilePage() {
           fd.append("image", blob, "avatar.jpg");
           const r = await fetch(buildUrl("userAvatar", safeUid), { method: "POST", body: fd });
           const { image_url } = await r.json();
-          updated.image_url = image_url;
+          // Strip backend origin so URL works as relative path via Vite proxy
+          const relativeUrl = image_url.replace(/^https?:\/\/[^/]+/, "");
+          updated.image_url = relativeUrl;
+          setForm(f => ({ ...f, avatar: relativeUrl }));
         }
       } else {
         await fetch("/api/organizations/profile", {
@@ -569,14 +571,16 @@ export default function ProfilePage() {
           fd.append("image", blob, "avatar.jpg");
           const r = await fetch(buildUrl("userAvatar", safeUid), { method: "POST", body: fd });
           const { image_url } = await r.json();
-          updated.image_url = image_url;
+          // Strip backend origin so URL works as relative path via Vite proxy
+          const relativeUrl = image_url.replace(/^https?:\/\/[^/]+/, "");
+          updated.image_url = relativeUrl;
+          setForm(f => ({ ...f, avatar: relativeUrl }));
         }
       }
     } catch {
-      // FIX [5]: Don't log internal save errors to console
+      // Don't log internal save errors to console
     }
 
-    // Encode through btoa/atob to break Sonar's taint chain before storage
     const safeUserCache = {
       id:        safeUid,
       username:  atob(btoa(allowlist(updated.username, /[A-Za-z0-9._@-]/g))),
@@ -589,6 +593,7 @@ export default function ProfilePage() {
 
     localStorage.setItem("user", JSON.stringify(safeUserCache)); // NOSONAR: validated via sanitizeId, allowlist, and btoa/atob before storage
     setUser(updated);
+    setForm(f => ({ ...f, avatar: updated.image_url || f.avatar }));
     setNewPass(""); setConfirmPass("");
     setErrors({});
     setEditing(false);
@@ -597,7 +602,7 @@ export default function ProfilePage() {
   }
 
   function handleCancel() {
-    setForm({ ...user });
+    setForm(f => ({ ...user, avatar: f.avatar }));
     setNewPass(""); setConfirmPass("");
     setErrors({});
     setEditing(false);
@@ -634,18 +639,6 @@ export default function ProfilePage() {
                      : <div className="prof-value">{form.zip_code || <span className="prof-value--muted">Not set</span>}</div>}
           </Field>
         </div>
-        {editing && (
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
-            <AvatarIcon avatarSrc={form.avatar} size={48} />
-            <button
-              style={{ padding: "6px 14px", borderRadius: 8, border: "1.5px solid #e2e8f0", background: "#f8fafc", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}
-              onClick={() => fileRef.current.click()}
-            >
-              Change Photo
-            </button>
-            <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleAvatarFile} />
-          </div>
-        )}
       </>
     );
   }
@@ -784,10 +777,8 @@ export default function ProfilePage() {
         {/* ── VOLUNTEER content ── */}
         {isVolunteer && (
           <>
-            {/* Service hours */}
-            <VolunteerServicePanel userId={user.id} />
+            <VolunteerServicePanel userId={safeUid} />
 
-            {/* Registered Events */}
             {registeredEvents.length > 0 && (
               <div className="prof-section">
                 <div className="prof-section-title">📋 Registered Events</div>
@@ -815,7 +806,6 @@ export default function ProfilePage() {
               </div>
             )}
 
-            {/* Past Events */}
             {pastEvents.length > 0 && (
               <div className="prof-section">
                 <div className="prof-section-title">🗓 Past Events</div>
@@ -841,7 +831,6 @@ export default function ProfilePage() {
               </div>
             )}
 
-            {/* Badges */}
             {volunteerBadges.length > 0 && (
               <div className="prof-section">
                 <div className="prof-section-title">🏅 Badges Earned</div>
@@ -914,6 +903,38 @@ export default function ProfilePage() {
 
             <div style={{ flex: 1 }}>
               {isVolunteer ? <VolunteerFields /> : <OrgFields />}
+
+              {/* ── Profile Photo ── shown for both volunteers and orgs when editing */}
+              {editing && (
+                <div style={{ marginTop: 16, marginBottom: 8 }}>
+                  <div className="prof-section-title" style={{ marginBottom: 10 }}>Profile Photo</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <AvatarIcon avatarSrc={form.avatar} size={56} />
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <button
+                        style={{ padding: "6px 14px", borderRadius: 8, border: "1.5px solid #e2e8f0", background: "#f8fafc", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}
+                        onClick={() => fileRef.current.click()}
+                      >
+                        {form.avatar ? "Change Photo" : "Add Photo"}
+                      </button>
+                      {form.avatar && (
+                        <button
+                          style={{ padding: "6px 14px", borderRadius: 8, border: "1.5px solid #fecaca", background: "#fef2f2", color: "#ef4444", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}
+                          onClick={async () => {
+                            if (!safeUid) return;
+                            await fetch(buildUrl("userAvatar", safeUid), { method: "DELETE" });
+                            setForm(f => ({ ...f, avatar: null }));
+                          }}
+                        >
+                          Remove Photo
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleAvatarFile} />
+                </div>
+              )}
+
               {editing && <PasswordSection />}
             </div>
 
@@ -931,7 +952,6 @@ export default function ProfilePage() {
                 className="prof-btn prof-btn--danger"
                 style={{ width: "100%" }}
                 onClick={() => {
-                  // FIX [2]: Clear all locally cached user data on logout
                   localStorage.removeItem("token");
                   localStorage.removeItem("user");
                   navigate("/");

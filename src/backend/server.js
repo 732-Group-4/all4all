@@ -8,15 +8,20 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import fs, { existsSync, readdirSync } from "fs";
+import { mkdirSync } from "fs";
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const UPLOADS_DIR = path.join(__dirname, "uploads");
+
+console.log("Serving uploads from:", path.join(__dirname, "uploads"));
+mkdirSync(path.join(UPLOADS_DIR, "profiles"), { recursive: true });
 
 const app = express();
 app.use(express.json());
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+app.use("/uploads", express.static(path.join(__dirname, "/uploads")));
 
 // ─── Shared Helpers ───────────────────────────────────────────────────────────
 
@@ -144,7 +149,11 @@ const imageUpload = multer({
 
 const profileUpload = multer({
   storage: multer.diskStorage({
-    destination: "uploads/profiles/",
+    destination: (req, file, cb) => {
+      const dir = path.join(UPLOADS_DIR, "profiles", req.params.id);
+      mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
     filename: (req, file, cb) => cb(null, `profile_${Date.now()}${safeExt(file.originalname)}`),
   }),
   limits: { fileSize: 5 * 1024 * 1024 },
@@ -511,9 +520,48 @@ app.get("/api/phone", async (req, res) => {
 
 app.post("/api/users/:id/avatar", profileUpload.single("image"), async (req, res) => {
   try {
-    const image_url = `/uploads/profiles/${req.file.filename}`;
+    const image_url = `/uploads/profiles/${req.params.id}/${req.file.filename}`;
     await pool.query("UPDATE users SET image_url = $1 WHERE id = $2", [image_url, req.params.id]);
     res.json({ image_url });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.get("/api/users/:id/avatar", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT image_url FROM users WHERE id = $1",
+      [req.params.id]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ image_url: null });
+    res.json({ image_url: result.rows[0].image_url ?? null });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.delete("/api/users/:id/avatar", async (req, res) => {
+  try {
+    // Get current image path before clearing it
+    const result = await pool.query("SELECT image_url FROM users WHERE id = $1", [req.params.id]);
+    if (result.rowCount === 0) return res.status(404).json({ error: "User not found" });
+
+    const image_url = result.rows[0].image_url;
+
+    // Clear from DB
+    await pool.query("UPDATE users SET image_url = NULL WHERE id = $1", [req.params.id]);
+
+    // Delete file from disk if it exists
+    if (image_url) {
+      const filename = image_url.split("/uploads/profiles/")[1];
+      if (filename) {
+        const filePath = path.join(UPLOADS_DIR, "profiles", req.params.id, filename);
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      }
+    }
+
+    res.json({ success: true });
   } catch (err) {
     handleError(res, err);
   }

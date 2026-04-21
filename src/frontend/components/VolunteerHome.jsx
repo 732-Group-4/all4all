@@ -1021,10 +1021,6 @@ export default function VolunteerHome() {
               <h2>{volunteer?.full_name}</h2>
             </div>
           </div>
-          <div className="home-badge">
-            <span className="home-badge__value">{volunteer?.hours_completed ?? "—"}</span>
-            <span className="home-badge__label">Hours Completed</span>
-          </div>
         </section>
 
         <MyEventsSlider
