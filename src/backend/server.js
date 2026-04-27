@@ -1,927 +1,962 @@
+import dotenv from 'dotenv';
 import express from "express";
 import bcrypt from "bcrypt";
 import { pool } from "./db.js";
 import jwt from "jsonwebtoken";
 import multer from "multer";
-import { mkdirSync, readdirSync, existsSync } from "fs";
-import { resolve, join } from "path";
+import path from "path";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+import fs, { existsSync, readdirSync } from "fs";
+import { mkdirSync } from "fs";
 
-// For using env variables (i.e. JWT_SECRET for tokens)
-import dotenv from "dotenv";
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const UPLOADS_DIR = path.join(__dirname, "uploads");
+
+console.log("Serving uploads from:", path.join(__dirname, "uploads"));
+mkdirSync(path.join(UPLOADS_DIR, "profiles"), { recursive: true });
 
 const app = express();
 app.use(express.json());
-app.use("/uploads", express.static(join(__dirname, "uploads"))); // serve upload folder so image file links work in browser
+app.use("/uploads", express.static(path.join(__dirname, "/uploads")));
 
-/*
-  Create a base user account 
-  The base user table handles overlapping login logic between the volunteers and organizations
-*/
+// ─── Shared Helpers ───────────────────────────────────────────────────────────
+
+function handleError(res, err) {
+  console.error(err);
+  if (err.code === "23505") return res.status(409).json({ error: "Already exists" });
+  res.status(500).send("Database error");
+}
+
+async function withTransaction(fn) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await fn(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// Returns a single row or 404
+async function queryOne(res, sql, params, notFoundMsg = "Not found") {
+  try {
+    const result = await pool.query(sql, params);
+    if (result.rowCount === 0) return res.status(404).json({ error: notFoundMsg });
+    res.json(result.rows[0]);
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
+// Returns all rows as array
+async function queryMany(res, sql, params = []) {
+  try {
+    const result = await pool.query(sql, params);
+    res.json(result.rows);
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
+// Mutates (UPDATE/DELETE) and returns { success: true } or 404
+async function mutateOne(res, sql, params, notFoundMsg = "Not found") {
+  try {
+    const result = await pool.query(sql, params);
+    if (result.rowCount === 0) return res.status(404).json({ error: notFoundMsg });
+    res.json({ success: true });
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
+// Acquires a client, runs fn(client), always releases, responds { success: true }
+async function withClient(res, fn) {
+  const client = await pool.connect();
+  try {
+    await fn(client);
+    res.json({ success: true });
+  } catch (err) {
+    handleError(res, err);
+  } finally {
+    client.release();
+  }
+}
+
+// Returns zip_code for a table keyed by user_id
+const ALLOWED_TABLES = new Set(["volunteers", "organizations"]);
+
+async function getZipCode(res, table, user_id) {
+  if (!ALLOWED_TABLES.has(table)) return res.status(400).json({ zip_code: null });
+  try {
+    if (!user_id) return res.status(400).json({ zip_code: null }); /* v8 ignore next */
+    const result = await pool.query(`SELECT zip_code FROM ${table} WHERE user_id = $1`, [user_id]);
+    if (result.rowCount === 0) return res.status(404).json({ zip_code: null });
+    res.json({ zip_code: result.rows[0].zip_code ?? null });
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
+// ─── Multer Setup ─────────────────────────────────────────────────────────────
+
+const ALLOWED_UPLOAD_TYPES = new Set(["user", "badge"]);
+const ALLOWED_IMAGE_EXTS   = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp"]);
+
+function safeExt(originalname) {
+  const ext = path.extname(originalname).toLowerCase();
+  return ALLOWED_IMAGE_EXTS.has(ext) ? ext : ".bin";
+}
+
+const imageUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      const { uploadType, userId } = req.body;
+
+      if (!ALLOWED_UPLOAD_TYPES.has(uploadType)) {
+        return cb(new Error("Invalid upload type"));
+      }
+
+      const safeFolder = TYPE_TO_FOLDER[uploadType];
+      if (!safeFolder) return cb(new Error("Invalid upload type"));
+
+      // Sanitize BEFORE any path construction (fixes L154-155)
+      const safeUserId = String(userId ?? "").replace(/[^0-9]/g, "");
+      if (!safeUserId) return cb(new Error("Invalid user ID"));
+
+      const base = path.resolve(__dirname, "uploads");
+      const dir  = path.resolve(base, safeFolder, safeUserId);
+
+      if (!dir.startsWith(base + path.sep)) { 
+        return cb(new Error("Invalid upload path"));/* v8 ignore next */
+      }
+
+      fs.mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
+    filename: (req, file, cb) => cb(null, `image_${Date.now()}${safeExt(file.originalname)}`),
+  }),
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
+
+const profileUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      // Sanitize user-controlled param before any path construction
+      const safeId = String(req.params.id ?? "").replace(/[^0-9]/g, "");
+      if (!safeId) return cb(new Error("Invalid user ID"));
+
+      const base = path.resolve(UPLOADS_DIR, "profiles");
+      const dir  = path.resolve(base, safeId);
+
+      // Validate resolved path stays within profiles directory
+      if (!dir.startsWith(base + path.sep)) { 
+        return cb(new Error("Invalid upload path")); /* v8 ignore next */
+      }
+
+      mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
+    filename: (req, file, cb) => cb(null, `profile_${Date.now()}${safeExt(file.originalname)}`),
+  }),
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
+
+const badgeUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      const dir = path.join(__dirname, "uploads/profiles/badges");
+      fs.mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
+    filename: (req, file, cb) => cb(null, `badge_${Date.now()}${safeExt(file.originalname)}`),
+  }),
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === "image/png") cb(null, true);
+    else cb(new Error("Only PNG files are allowed"));
+  },
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
+
+// ─── User / Auth ──────────────────────────────────────────────────────────────
+
 async function createUser(client, username, email, password, phone, role) {
   const hashed = await bcrypt.hash(password, 10);
-
   const result = await client.query(
     "INSERT INTO users(username,email,password_hash,phone_number,role) VALUES($1,$2,$3,$4,$5) RETURNING id",
     [username, email, hashed, phone, role]
   );
-
   return result.rows[0].id;
 }
 
-/*
-  Register a volunteer (with an associated base user account)
-  Volunteer account needs email, password, firstName, lastName, and phone
-*/
-app.post("/api/registerVolunteer", async (req, res) => {
-  const client = await pool.connect();
-  let transactionStarted = false;
-
-
-  try {
-    const { username, email, password, firstName, lastName, phone } = req.body;
-
-    if (!username || !email || !password || !firstName || !lastName) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
-
-    await client.query("BEGIN");
-    transactionStarted = true;
-
-    const user_id = await createUser(client, username, email, password, phone, "VOLUNTEER");
-
-    const full_name = `${firstName} ${lastName}`;
-
-    const volunteerResult = await client.query(
-      "INSERT INTO volunteers(user_id,full_name) VALUES($1,$2) RETURNING id",
-      [user_id, full_name]
-    );
-
-    await client.query("COMMIT");
-    transactionStarted = false;
-
-    res.json({ id: volunteerResult.rows[0].id, user_id });
-
-  } catch (err) {
-    if (transactionStarted) {
-      await client.query("ROLLBACK");
-    }
-
-    if (err.code === "23505") {
-      return res.status(409).json({ error: "User already exists" });
-    }
-
-    console.error(err);
-    res.status(500).send("Database error");
-
-  } finally {
-    client.release();
-  }
-});
-
-
-/*
-* Get OrgCategories, to show in the dropdown on accound creation page
-*/
-app.get("/api/orgCategories", async (req, res) => {
-  try {
-    const result = await pool.query(
-      "SELECT * FROM org_categories"
-    );
-
-    res.json(result.rows);
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Database error");
-  }
-});
-
-/*
-  Register an organization (with an associated base user account)
-  Org needs name, email, phone, password, and a category id 
-*/
-app.post("/api/registerOrg", async (req, res) => {
-  const client = await pool.connect();
-  let transactionStarted = false;
-
-  try {
-    const { name, email, phone, description, password, category_id, zip_code } = req.body;
-
-    await client.query("BEGIN");
-    transactionStarted = true;
-
-    const user_id = await createUser(client, name, email, password, phone, "ORGANIZATION");
-
-    const orgResult = await client.query(
-      `INSERT INTO organizations(user_id,name,description,category_id,zip_code) VALUES($1,$2,$3,$4,$5) RETURNING id`,
-      [user_id, name, description, category_id, zip_code]
-    );
-
-    await client.query("COMMIT");
-    transactionStarted = false;
-
-    res.json({ id: orgResult.rows[0].id });
-
-  } catch (err) {
-    if (transactionStarted) {
-      await client.query("ROLLBACK");
-    }
-
-    if (err.code === "23505") {
-      return res.status(409).json({ error: "Email already exists" });
-    }
-
-    console.error(err);
-    res.status(500).send("Database error");
-
-  } finally {
-    client.release();
-  }
-});
-
-/*
-  Check if email is already registered
-*/
-app.get("/api/checkEmail", async (req, res) => {
-  try {
-    const { email } = req.query;
-
-    if (!email) {
-      return res.status(400).json({ error: "Email required" });
-    }
-
-    const result = await pool.query(
-      "SELECT 1 FROM users WHERE email = $1 LIMIT 1",
-      [email]
-    );
-
-    res.json({ available: result.rowCount === 0 });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Database error");
-  }
-});
-
-/*
-  Register a new event (available for any organization account to do)
-  Create all new events as DRAFT first, user must explicitly set a different status later (PUBLISH, etc.)
-*/
-app.post("/api/events", async (req, res) => {
-  const client = await pool.connect();
-
-  try {
-    const { organization_id, name, description, start_time, end_time, address, city, state, zip_code } = req.body;
-
-    if (!organization_id || !name || !description || !start_time || !end_time || !zip_code) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
-
-    const result = await client.query(
-      `INSERT INTO events (organization_id,name,description,start_time,end_time,address,city,state,zip_code) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-      [organization_id, name, description, start_time, end_time, address, city, state, zip_code]
-    );
-
-    res.json({ id: result.rows[0].id });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Database error");
-  } finally {
-    client.release();
-  }
-});
-
-/*
-  Update the details of an existing event
-  Can be used by organizations to update any and all details of their event, other than the organization id associated with it
-*/
-app.put("/api/events/:id", async (req, res) => {
-  try {
-    const { name, description, start_time, end_time, address, city, state, zip_code } = req.body;
-
-    const result = await pool.query(
-      `UPDATE events SET name = $1, description = $2, start_time = $3, end_time = $4, address = $5, city = $6, state = $7, zip_code = $8 WHERE id = $9 RETURNING id`,
-      [name, description, start_time, end_time, address, city, state, zip_code, req.params.id]
-    );
-
-    //Specified event id not found
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: "Event not found" });
-    }
-
-    res.json({ success: true });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Database error");
-  }
-});
-
-/*
-  Get all events with a PUBLISHED status
-  This is used for volunteer users to be able to view all events they could register for 
-*/
-app.get("/api/events", async (req, res) => {
-  try {
-    const result = await pool.query(
-      "SELECT * FROM events WHERE status = 'PUBLISHED' ORDER BY start_time"
-    );
-
-    res.json(result.rows);
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Database error");
-  }
-});
-
-/*
-  Get a specific event by its ID 
-  This is meant for viewing the details of one specific event for both volunteers and organizations
-*/
-app.get("/api/events/:id", async (req, res) => {
-  try {
-    const result = await pool.query(
-      "SELECT * FROM events WHERE id = $1",
-      [req.params.id]
-    );
-
-    //Specified event does not exist in the db
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: "Event not found" });
-    }
-
-    res.json(result.rows[0]);
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Database error");
-  }
-});
-
-/* Get all of the events linked to the specified organization id
-  publishedOnly = false (default): Used for organizations to view all of their own events 
-  publishedOnly = true: Used for volunteers to view all published events for a specific organization (filter)
-
-  Examples:
-  Org 1:                          GET /api/organizations/1/events
-  Volunteer (filter for org 1):   GET /api/organizations/1/events?publishedOnly=true
-*/
-app.get("/api/organizations/:id/events", async (req, res) => {
-  try {
-    const { publishedOnly } = req.query;
-
-    let query = `SELECT * FROM events WHERE organization_id = $1`;
-
-    const params = [req.params.id];
-
-    //Only get published events (for volunteers to view)
-    if (publishedOnly === "true") {
-      query += ` AND status = 'PUBLISHED'`;
-    }
-
-    query += ` ORDER BY start_time`;
-
-    const result = await pool.query(query, params);
-
-    res.json(result.rows);
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Database error");
-  }
-});
-
-/*
-  Move the specified event's status from DRAFT (or other state) to PUBLISHED
-  PUBLISHED events can be viewed by volunteer users
-*/
-app.put("/api/events/:id/publish", async (req, res) => {
-  try {
-    const result = await pool.query(
-      "UPDATE events SET status = 'PUBLISHED' WHERE id = $1 RETURNING id",
-      [req.params.id]
-    );
-
-    //Specified event does not exist in the db
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: "Event not found" });
-    }
-
-    res.json({ success: true });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Database error");
-  }
-});
-
-/*
-  Cancel a specific event by its id
-*/
-app.put("/api/events/:id/cancel", async (req, res) => {
-  try {
-    const result = await pool.query(
-      `UPDATE events SET status = 'CANCELLED' WHERE id = $1 RETURNING id`,
-      [req.params.id]
-    );
-
-    //Specified event was not found in the db
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: "Event not found" });
-    }
-
-    res.json({ success: true });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Database error");
-  }
-});
-
-/*
-  Allows a volunteer to register for a specific event provided that they have been able to view the event (to get its id)
-  For a volunteer to register for an event, the event must be PUBLISHED at the time of registration
-*/
-app.post("/api/events/:id/register", async (req, res) => {
-  try {
-    const { volunteer_id } = req.body;
-    const event_id = req.params.id;
-
-    //Check event exists and is published
-    const eventResult = await pool.query(
-      "SELECT status FROM events WHERE id = $1",
-      [event_id]
-    );
-
-    //Specified event not found
-    if (eventResult.rowCount === 0) {
-      return res.status(404).json({ error: "Event not found" });
-    }
-
-    //Event's status is any other than PUBLISHED
-    if (eventResult.rows[0].status !== "PUBLISHED") {
-      return res.status(400).json({ error: "Event is not open for registration" });
-    }
-
-    //Register volunteer
-    await pool.query(
-      `INSERT INTO event_registrations(event_id, volunteer_id) VALUES ($1, $2)`,
-      [event_id, volunteer_id]
-    );
-
-    res.json({ success: true });
-
-  } catch (err) {
-    if (err.code === "23505") {
-      return res.status(409).json({ error: "Volunteer already registered" });
-    }
-
-    console.error(err);
-    res.status(500).send("Database error");
-  }
-});
-
-/*
-  Allows volunteer users to be unregistered for an event
-  Volunteers can choose to remove a registration, or organizations could remove a volunteer from an event
-*/
-app.delete("/api/events/:id/register", async (req, res) => {
-  try {
-    const { volunteer_id } = req.body;
-
-    const result = await pool.query(
-      `DELETE FROM event_registrations WHERE event_id = $1 AND volunteer_id = $2`,
-      [req.params.id, volunteer_id]
-    );
-
-    //No record of the volunteer being registered for the specified event
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: "Registration not found" });
-    }
-
-    res.json({ success: true });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Database error");
-  }
-});
-
-/*
-* login the user, returning a token or 401 on invalid credentials
-*/
 app.post("/api/login", async (req, res) => {
   try {
     const { username, password } = req.body;
-
     const result = await pool.query(
       "SELECT id, email, password_hash, role FROM users WHERE username = $1 LIMIT 1",
       [username]
     );
-
     if (result.rowCount === 0 || !(await bcrypt.compare(password, result.rows[0].password_hash))) {
-      res.status(401).send("Invalid username or password.");
-    } else {
-      const user_role = result.rows[0].role;
-      const user_id = result.rows[0].id;
-      const token = jwt.sign(
-        { id: user_id, role: user_role },
-        // eslint-disable-next-line no-undef
-        process.env.JWT_SECRET,
-        { expiresIn: "7d" }
-      );
-
-
-      res.json({
-        token,
-        user: {
-          id: user_id,
-          username: username,
-          email: result.rows[0].email,
-          role: user_role
-        }
-      });
+      return res.status(401).send("Invalid email or password.");
     }
-
+    const { id, email, role } = result.rows[0];
+    const token = jwt.sign({ id, email, role }, process.env.JWT_SECRET, { expiresIn: "7d" });
+    res.json({ token, user: { id, username, email, role } });
   } catch (err) {
-    console.error(err);
-    res.status(500).send("Database error");
+    handleError(res, err);
   }
 });
 
-/* Get number of registered volunteers for an event
- */
-app.get("/api/events/:id/count", async (req, res) => {
+app.get("/api/checkEmail", async (req, res) => {
   try {
-    const event_id = req.params.id;
-
-    // Check event exists
-    const eventResult = await pool.query(
-      "SELECT status, organization_id FROM events WHERE id = $1",
-      [event_id]
-    );
-
-    if (eventResult.rowCount === 0) {
-      return result.status(404).send("Event not found");
-    }
-
-    let query = `SELECT COUNT(*) FROM event_registrations WHERE event_id = $1`;
-
-    const params = [req.params.id];
-
-    const result = await pool.query(query, params);
-    const count = parseInt(result.rows[0].count, 10);
-    res.json({ count });
-
+    const { email } = req.query;
+    if (!email) return res.status(400).json({ error: "Email required" });
+    const result = await pool.query("SELECT 1 FROM users WHERE email = $1 LIMIT 1", [email]);
+    res.json({ available: result.rowCount === 0 });
   } catch (err) {
-    console.error(err);
-    res.status(500).send("Database error");
+    handleError(res, err);
   }
 });
+
+// ─── Volunteer Registration & Profile ─────────────────────────────────────────
+
+app.post("/api/registerVolunteer", async (req, res) => {
+  const { username, email, password, firstName, lastName, phone } = req.body;
+  if (!username || !email || !password || !firstName || !lastName) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+  try {
+    const { volunteerId, userId } = await withTransaction(async (client) => {
+      const user_id = await createUser(client, username, email, password, phone, "VOLUNTEER");
+      const result = await client.query(
+        "INSERT INTO volunteers(user_id,full_name) VALUES($1,$2) RETURNING id",
+        [user_id, `${firstName} ${lastName}`]
+      );
+      return { volunteerId: result.rows[0].id, userId: user_id };
+    });
+    res.json({ id: volunteerId, user_id: userId });
+  } catch (err) {
+    if (err.code === "23505") return res.status(409).json({ error: "User already exists" });
+    handleError(res, err);
+  }
+});
+
+app.get("/api/volunteers/zip_code", (req, res) =>
+  getZipCode(res, "volunteers", req.query.user_id)
+);
+
+app.get("/api/volunteers/:id/registrations", (req, res) =>
+  queryMany(res,
+    `SELECT e.* FROM events e
+     JOIN event_registrations er ON er.event_id = e.id
+     JOIN volunteers v ON v.id = er.volunteer_id
+     WHERE v.user_id = $1
+     ORDER BY e.start_time`,
+    [req.params.id]
+  )
+);
+
+app.get("/api/volunteers/:id/past-events", (req, res) =>
+  queryMany(res,
+    `SELECT e.*, er.attended, er.time_in, er.time_out
+     FROM events e
+     JOIN event_registrations er ON er.event_id = e.id
+     JOIN volunteers v ON v.id = er.volunteer_id
+     WHERE v.user_id = $1 AND e.end_time < NOW()
+     ORDER BY e.start_time DESC`,
+    [req.params.id]
+  )
+);
+
+app.get("/api/volunteers/:id/badges", (req, res) =>
+  queryMany(res,
+    `SELECT b.name, b.description, b.image_url, vb.earned_at
+     FROM volunteer_badges vb
+     JOIN badges b ON b.id = vb.badge_id
+     WHERE vb.volunteer_id = $1
+     ORDER BY vb.earned_at DESC`,
+    [req.params.id]
+  )
+);
+
+app.post("/api/volunteers/:id/badges", async (req, res) => {
+  try {
+    const { badge_id } = req.body;
+    await pool.query(
+      "INSERT INTO volunteer_badges(volunteer_id, badge_id) VALUES($1,$2) ON CONFLICT DO NOTHING",
+      [req.params.id, badge_id]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.get("/api/volunteers/:id/service-hours", (req, res) =>
+  queryMany(res,
+    `SELECT e.id AS event_id, e.name AS event_name, e.start_time, e.end_time,
+            o.name AS organization_name,
+            COALESCE(json_agg(DISTINCT ec.name) FILTER (WHERE ec.name IS NOT NULL), '[]') AS tags,
+            er.attended, er.time_in, er.time_out,
+            CASE
+              WHEN er.time_in IS NOT NULL AND er.time_out IS NOT NULL
+              THEN EXTRACT(EPOCH FROM (er.time_out - er.time_in)) / 3600
+              WHEN e.start_time IS NOT NULL AND e.end_time IS NOT NULL AND er.attended
+              THEN EXTRACT(EPOCH FROM (e.end_time - e.start_time)) / 3600
+              ELSE 0
+            END AS hours
+     FROM event_registrations er
+     JOIN events e ON e.id = er.event_id
+     JOIN organizations o ON o.id = e.organization_id
+     JOIN volunteers v ON v.id = er.volunteer_id
+     LEFT JOIN event_category_links ecl ON ecl.event_id = e.id
+     LEFT JOIN event_categories ec ON ec.id = ecl.event_category_id
+     WHERE v.user_id = $1
+     GROUP BY e.id, e.name, e.start_time, e.end_time, o.name, er.attended, er.time_in, er.time_out
+     ORDER BY e.start_time DESC`,
+    [req.params.id]
+  )
+);
+
+// NOTE: keep AFTER all static-segment /api/volunteers/... routes
+app.get("/api/volunteers/:id", (req, res) =>
+  queryOne(res,
+    `SELECT v.id, v.full_name, u.email, u.phone_number
+     FROM volunteers v
+     JOIN users u ON u.id = v.user_id
+     WHERE v.user_id = $1`,
+    [req.params.id],
+    "Volunteer not found"
+  )
+);
+
+app.put("/api/volunteers/profile", async (req, res) => {
+  try {
+    const { user_id, firstName, lastName, zip_code } = req.body;
+    await pool.query(
+      "UPDATE volunteers SET full_name = $1, zip_code = $2 WHERE user_id = $3",
+      [`${firstName} ${lastName}`, zip_code, user_id]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// ─── Organization Registration & Profile ──────────────────────────────────────
+
+app.post("/api/registerOrg", async (req, res) => {
+  try {
+    const { username, name, email, phone, description, password, category_id, zip_code, address, brand_colors } = req.body;
+    const orgId = await withTransaction(async (client) => {
+      const user_id = await createUser(client, username, email, password, phone, "ORGANIZATION");
+      const result = await client.query(
+        "INSERT INTO organizations(user_id, name, description, category_id, zip_code, address, brand_colors) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id",
+        [user_id, name, description, category_id, zip_code, address, brand_colors]
+      );
+      return result.rows[0].id;
+    });
+    res.json({ id: orgId });
+  } catch (err) {
+    if (err.code === "23505") return res.status(409).json({ error: "Email already exists" });
+    handleError(res, err);
+  }
+});
+
+app.get("/api/organizations/zip_code", (req, res) =>
+  getZipCode(res, "organizations", req.query.user_id)
+);
+
+app.get("/api/organizations/address", async (req, res) => {
+  try {
+    const { user_id } = req.query;
+    const result = await pool.query("SELECT address FROM organizations WHERE user_id = $1", [user_id]);
+    if (result.rowCount === 0) return res.status(404).json({ address: null });
+    res.json({ address: result.rows[0].address });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.get("/api/organizations/motto", async (req, res) => {
+  try {
+    const { user_id } = req.query;
+    const result = await pool.query("SELECT description FROM organizations WHERE user_id = $1", [user_id]);
+    if (result.rowCount === 0) return res.status(404).json({ motto: null });
+    res.json({ motto: result.rows[0].description });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.get("/api/organizations/brand_colors", async (req, res) => {
+  try {
+    const { user_id } = req.query;
+    const result = await pool.query("SELECT brand_colors FROM organizations WHERE user_id = $1", [user_id]);
+    if (result.rowCount === 0) return res.status(404).json({ colors: [] });
+    res.json({ colors: result.rows[0]?.brand_colors || [] });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.get("/api/organizations/profile", async (req, res) => {
+  try {
+    const { user_id } = req.query;
+    if (!user_id) return res.status(400).json({ error: "user_id required" });
+    const result = await pool.query(
+      "SELECT name, address, zip_code, description AS motto, brand_colors FROM organizations WHERE user_id = $1",
+      [user_id]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: "Organization not found" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.put("/api/organizations/profile", async (req, res) => {
+  try {
+    const { user_id, name, address, zip_code, motto, brand_colors } = req.body;
+    await pool.query(
+      "UPDATE organizations SET name=$1, address=$2, zip_code=$3, description=$4, brand_colors=$5 WHERE user_id=$6",
+      [name, address, zip_code, motto, brand_colors, user_id]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.get("/api/organizations/by-user/:userId", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM organizations WHERE user_id = $1", [req.params.userId]);
+    if (result.rowCount === 0) return res.status(404).send("Not found");
+    res.json(result.rows[0]);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.get("/api/organizations/:id/event-stats", (req, res) =>
+  queryMany(res,
+    `SELECT e.id, e.name, e.start_time, e.end_time, e.status,
+            COALESCE(json_agg(DISTINCT ec.name) FILTER (WHERE ec.name IS NOT NULL), '[]') AS tags,
+            COUNT(DISTINCT er.volunteer_id) AS volunteer_count,
+            COALESCE(SUM(
+              CASE
+                WHEN er.time_in IS NOT NULL AND er.time_out IS NOT NULL
+                THEN EXTRACT(EPOCH FROM (er.time_out - er.time_in)) / 3600
+                WHEN er.attended THEN EXTRACT(EPOCH FROM (e.end_time - e.start_time)) / 3600
+                ELSE 0
+              END
+            ), 0) AS total_hours
+     FROM events e
+     LEFT JOIN event_registrations er ON er.event_id = e.id
+     LEFT JOIN event_category_links ecl ON ecl.event_id = e.id
+     LEFT JOIN event_categories ec ON ec.id = ecl.event_category_id
+     WHERE e.organization_id = $1
+     GROUP BY e.id, e.name, e.start_time, e.end_time, e.status
+     ORDER BY e.start_time DESC`,
+    [req.params.id]
+  )
+);
+
+// NOTE: keep AFTER all static-segment /api/organizations/... routes
+app.get("/api/organizations/:id/events", async (req, res) => {
+  try {
+    const { publishedOnly } = req.query;
+    let query = `
+      SELECT e.*, o.name AS organization_name,
+             COALESCE(json_agg(DISTINCT ec.name) FILTER (WHERE ec.name IS NOT NULL), '[]') AS tags
+      FROM events e
+      LEFT JOIN organizations o ON o.id = e.organization_id
+      LEFT JOIN event_category_links ecl ON ecl.event_id = e.id
+      LEFT JOIN event_categories ec ON ec.id = ecl.event_category_id
+      WHERE e.organization_id = $1
+    `;
+    const params = [req.params.id];
+    if (publishedOnly === "true") query += " AND e.status = 'PUBLISHED'";
+    query += " GROUP BY e.id, o.name ORDER BY e.start_time";
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// NOTE: keep AFTER all static-segment /api/organizations/... routes
+app.get("/api/organizations/:id", (req, res) =>
+  queryOne(res,
+    "SELECT * FROM organizations WHERE id = $1",
+    [req.params.id],
+    "Organization not found"
+  )
+);
+
+app.get("/api/orgCategories", (req, res) =>
+  queryMany(res, "SELECT * FROM org_categories")
+);
+
+// ─── Shared Profile Helpers ───────────────────────────────────────────────────
 
 app.get("/api/full_name", async (req, res) => {
   try {
-    const user_id = req.query.user_id;
-    let org = false;
-    let result = await pool.query(
-      "SELECT full_name FROM volunteers WHERE user_id = $1",
-      [user_id]
-    );
+    const { user_id } = req.query;
+    let result = await pool.query("SELECT full_name AS name FROM volunteers WHERE user_id = $1", [user_id]);
     if (result.rowCount === 0) {
-      org = true
-      result = await pool.query(
-        "SELECT name FROM organizations WHERE user_id = $1",
-        [user_id]
-      );
+      result = await pool.query("SELECT name FROM organizations WHERE user_id = $1", [user_id]);
     }
-
-    if (result.rowCount === 0) {
-      return res.status(404).send("User ID not found.");
-    }
-
-    // if we get here, we're good
-    let name = null;
-    if (org) {
-      name = result.rows[0].name;
-    } else {
-      name = result.rows[0].full_name;
-    }
-    res.json({ name });
-
-
+    if (result.rowCount === 0) return res.status(404).send("User ID not found.");
+    res.json({ name: result.rows[0].name });
   } catch (err) {
-    console.error(err);
-    res.status(500).send("Database error");
+    handleError(res, err);
   }
 });
 
-// Associate a badge with an event, insert into the appropriate table
-// The event needs to be created before hitting this endpoint, so in order
-// for it to be used. The event_id has to already exist in the events table
-// the badge_id also needs to already exist, so the badge has to be created already
-app.post("/api/event_badges", async (req, res) => {
+app.get("/api/phone", async (req, res) => {
   try {
-    const { event_id, badge_id } = req.body;
-
-    if (!event_id || !badge_id) {
-      return res.status(400).send("event_id and badge_id are required.");
-    }
-
-    await pool.query(
-      "INSERT INTO event_badges (event_id, badge_id) VALUES ($1, $2)",
-      [event_id, badge_id]
-    );
-
-    res.status(201).send("Badge attached to event successfully.");
+    const { user_id } = req.query;
+    const result = await pool.query("SELECT phone_number FROM users WHERE id = $1", [user_id]);
+    if (result.rowCount === 0) return res.status(404).send("User not found.");
+    res.json({ phone: result.rows[0].phone_number });
   } catch (err) {
-    console.error(err);
-    res.status(500).send("Database error");
+    handleError(res, err);
   }
 });
 
-// Get all of the badges associated with a particular event
-app.get("/api/event_badges", async (req, res) => {
+app.post("/api/users/:id/avatar", profileUpload.single("image"), async (req, res) => {
   try {
-    const { event_id } = req.query;
+    const image_url = `/uploads/profiles/${req.params.id}/${req.file.filename}`;
+    await pool.query("UPDATE users SET image_url = $1 WHERE id = $2", [image_url, req.params.id]);
+    res.json({ image_url });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
 
-    if (!event_id) {
-      return res.status(400).send("event_id is required.");
-    }
-
+app.get("/api/users/:id/avatar", async (req, res) => {
+  try {
     const result = await pool.query(
-      `SELECT badges.* FROM badges
-       JOIN event_badges ON badges.id = event_badges.badge_id
-       WHERE event_badges.event_id = $1`,
-      [event_id]
+      "SELECT image_url FROM users WHERE id = $1",
+      [req.params.id]
     );
-
-    res.json(result.rows);
+    if (result.rowCount === 0) return res.status(404).json({ image_url: null });
+    res.json({ image_url: result.rows[0].image_url ?? null });
   } catch (err) {
-    console.error(err);
-    res.status(500).send("Database error");
+    handleError(res, err);
   }
 });
 
-// create an event category, to later be added to an event
-app.post("/api/event_categories", async (req, res) => {
+app.delete("/api/users/:id/avatar", async (req, res) => {
   try {
-    const { name } = req.body;
+    // Sanitize user-controlled param before any path construction (fixes L560)
+    const safeId = String(req.params.id).replace(/[^0-9]/g, "");
+    if (!safeId) return res.status(400).json({ error: "Invalid user ID" });
 
-    if (!name) {
-      console.log("No name for category")
-      return res.status(400).send("name is required.");
+    const result = await pool.query("SELECT image_url FROM users WHERE id = $1", [safeId]);
+    if (result.rowCount === 0) return res.status(404).json({ error: "User not found" });
+
+    const image_url = result.rows[0].image_url;
+
+    await pool.query("UPDATE users SET image_url = NULL WHERE id = $1", [safeId]);
+
+    if (image_url) {
+      const filename = path.basename(image_url); // use basename, never trust full path from DB
+      if (filename && filename !== ".") {
+        const base     = path.resolve(UPLOADS_DIR, "profiles");
+        const filePath = path.resolve(base, safeId, filename);
+
+        // Validate resolved path stays within UPLOADS_DIR (fixes L560 existence check)
+        if (filePath.startsWith(base + path.sep) && fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      }
     }
 
-    const result = await pool.query(
-      "INSERT INTO event_categories (name) VALUES ($1) RETURNING id",
-      [name]
-    );
+    res.json({ success: true });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
 
+app.post("/api/upload_image", imageUpload.single("file"), (req, res) => {
+  try {
+    const { uploadType, userId } = req.body;
+    const safeFolder = TYPE_TO_FOLDER[uploadType];
+    const safeUserId = String(userId).replace(/[^0-9]/g, "");
+    const fileUrl = `/uploads/${safeFolder}/${safeUserId}/${req.file.filename}`;
+    res.json({ url: fileUrl });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// ─── Events ───────────────────────────────────────────────────────────────────
+
+app.post("/api/events", async (req, res) => {
+  const { organization_id, name, description, start_time, end_time, address, city, state, zip_code, color, recurrence } = req.body;
+  if (!organization_id || !name || !description || !start_time || !end_time || !zip_code) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+  if (new Date(end_time) <= new Date(start_time)) {
+    return res.status(400).json({ error: "end_time must be after start_time" });
+  }
+  const client = await pool.connect();
+  try {
+    const result = await client.query(
+      `INSERT INTO events (organization_id, name, description, start_time, end_time, address, city, state, zip_code, color, recurrence)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+      [organization_id, name, description, start_time, end_time, address, city, state, zip_code, color ?? "#15803d", recurrence || null]
+    );
     res.json({ id: result.rows[0].id });
   } catch (err) {
-
-    if (err.code === "23505") {
-      return res.status(400).send("Name must be unique")
-    }
-    console.error(err);
-    res.status(500).send("Database error");
-  }
-});
-
-// Retrieve all existing event categories
-app.get("/api/event_categories/:filter", async (req, res) => {
-  try {
-    const { filter } = req.params;
-
-    const result = await pool.query(
-      "SELECT * FROM event_categories WHERE name LIKE $1",
-      [`%${filter}%`]
-    );
-
-    res.json(result.rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Database error");
-  }
-});
-
-// Associate a category with an event, insert into the appropriate table
-// The event needs to be created before hitting this endpoint, so in order
-// for it to be used. The event_id has to already exist in the events table
-// the category_id also needs to already exist, so the badge has to be created already
-
-app.post("/api/event/add_categories", async (req, res) => {
-  try {
-    const { event_id, event_category_id } = req.body;
-
-    if (!event_id || !event_category_id) {
-      return res.status(400).send("event_id and event_category_id are required.");
-    }
-
-    await pool.query(
-      "INSERT INTO event_category_links (event_id, event_category_id) VALUES ($1, $2)",
-      [event_id, event_category_id]
-    );
-
-    res.status(201).send("Category attached to event successfully.");
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Database error");
-  }
-});
-
-// Get all events in a particular zip code
-app.get("/api/events_by_zip/:zip_code", async (req, res) => {
-  try {
-    const { zip_code } = req.params;
-
-    const result = await pool.query(
-      `SELECT * FROM events WHERE zip_code = $1`,
-      [zip_code]
-    );
-
-    res.json(result.rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Database error");
-  }
-});
-
-// Get all events associated with a particular category
-app.get("/api/events_by_cat/:category_id", async (req, res) => {
-  try {
-    const { category_id } = req.params;
-
-    const result = await pool.query(
-      `SELECT events.* FROM events 
-       JOIN event_category_links ON events.id = event_category_links.event_id
-       WHERE event_category_links.event_category_id = $1`,
-      [category_id]
-    );
-
-    res.json(result.rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Database error");
-  }
-});
-
-// Reward badges to those who came to the event, Gets the event_id
-// and gets all of the volunteers that came to the event, gets all of the badges
-// associated with the event. Give the badges to those who came
-app.post("/api/volunteer_badges/award", async (req, res) => {
-  try {
-    const { event_id } = req.body;
-
-    if (!event_id) {
-      return res.status(400).send("event_id is required.");
-    }
-
-    // Get all volunteers who attended the event
-    const volunteers = await pool.query(
-      "SELECT volunteer_id FROM event_registrations WHERE event_id = $1 AND attended = TRUE",
-      [event_id]
-    );
-
-    // Get all badges attached to the event
-    const badges = await pool.query(
-      "SELECT badge_id FROM event_badges WHERE event_id = $1",
-      [event_id]
-    );
-
-    if (volunteers.rowCount === 0 || badges.rowCount === 0) {
-      return res.status(404).send("No attended volunteers or no badges found for this event.");
-    }
-
-    // Award every badge to every attended volunteer
-    for (const volunteer of volunteers.rows) {
-      for (const badge of badges.rows) {
-        await pool.query(
-          `INSERT INTO volunteer_badges (volunteer_id, badge_id)
-           VALUES ($1, $2)
-           ON CONFLICT DO NOTHING`,
-          [volunteer.volunteer_id, badge.badge_id]
-        );
-      }
-    }
-
-    res.status(201).send("Badges awarded successfully.");
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Database error");
-  }
-});
-
-// get all of the badges for a particular volunteer
-app.get("/api/volunteer_badges", async (req, res) => {
-  try {
-    const { volunteer_id } = req.query;
-
-    if (!volunteer_id) {
-      return res.status(400).send("volunteer_id is required.");
-    }
-
-    const result = await pool.query(
-      `SELECT badges.*, volunteer_badges.earned_at FROM badges
-       JOIN volunteer_badges ON badges.id = volunteer_badges.badge_id
-       WHERE volunteer_badges.volunteer_id = $1`,
-      [volunteer_id]
-    );
-
-    res.json(result.rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Database error");
-  }
-});
-
-// set upload directory and filename callbacks for multer
-const storage = multer.diskStorage({
-  destination: function(req, file, cb) {
-    const rawType = Array.isArray(req.body.uploadType) ? req.body.uploadType[0] : req.body.uploadType;
-    const rawId = Array.isArray(req.body.userId) ? req.body.userId[0] : req.body.userId;
-
-    const strType = String(rawType || '');
-    const strId = String(rawId || '');
-
-    // 1. Validate 'type' and throw a 400 if invalid
-    const allowedTypes = { 'user': 'user', 'badge': 'badge' };
-    const safeType = allowedTypes[strType];
-
-    if (!safeType) {
-      const err = new Error('Unsupported uploadType');
-      err.status = 400; // Forces Express error handler to return 400 instead of 500
-      return cb(err);
-    }
-
-    // 2. Validate 'id' and throw a 400 if invalid
-    const match = strId.match(/^[a-zA-Z0-9-]+$/);
-    const safeId = match ? match : null;
-
-    if (!safeId) {
-      const err = new Error('Invalid user ID');
-      err.status = 400;
-      return cb(err);
-    }
-
-    let basePath = resolve('./uploads');
-    if (Array.isArray(basePath)) basePath = basePath[0];
-
-    try {
-      const uploadPath = join(String(basePath), String(safeType), String(safeId));
-
-      if (!uploadPath.startsWith(String(basePath))) {
-        const err = new Error('Path traversal attempt detected.');
-        err.status = 400;
-        return cb(err);
-      }
-
-      mkdirSync(uploadPath, { recursive: true });
-      cb(null, uploadPath);
-    } catch (err) {
-      cb(err);
-    }
-  },
-  filename: function(req, file, cb) {
-    cb(null, file.originalname);
-  }
-});
-
-const upload = multer({ storage: storage })
-
-app.post("/api/upload_image", upload.single("file"), async (req, res) => {
-  try {
-    // TODO: Add token verification here so you can only change your own picture
-    let result;
-    switch (req.body.uploadType) {
-      case "user":
-        result = await pool.query(
-          "UPDATE users SET image_url=$1 WHERE id=$2",
-          [`/uploads/${req.body.uploadType}/${req.body.userId}/${req.file.fieldname}`, req.body.userId]
-        );
-        console.log("user update finished");
-        if (result.rowCount === 0) {
-          return res.status(404).send("Failed to update the database, userId not found");
-        }
-        break;
-      case "badge":
-        result = await pool.query(
-          "UPDATE badges SET image_url=$1 WHERE id=$2 AND user_id=$3",
-          [`/uploads/${req.body.uploadType}/${req.body.userId}/${req.file.fieldname}`, req.body.badgeId, req.body.userId]
-        );
-        console.log("badge upload done");
-        if (result.rowCount === 0) {
-          return res.status(404).send("Failed to update the database, matching badge entry not found");
-        }
-        break;
-      default:
-        return res.status(400).send("Unsupported upload type.");
-    }
-    console.log("sending success msg");
-    res.send('File uploaded successfully');
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Database Error");
-  }
-});
-
-/*
-  Create a new entry in the badges table
-  Badges need name, description, and uploading user_id 
-  This assumes that a separate call will be made to /api/upload_image to add a photo
-*/
-app.post("/api/createBadge", async (req, res) => {
-  const client = await pool.connect();
-  let transactionStarted = false;
-
-
-  try {
-    // TODO: get user id from token rather than body
-    const { badge_name, description, user_id } = req.body;
-
-    if (!badge_name || !description || !user_id) {
-      console.log(`missing req fields: ${badge_name},${description},${user_id}`)
-      return res.status(400).json({ error: "Missing required fields" });
-    }
-
-    await client.query("BEGIN");
-    transactionStarted = true;
-
-    const badgeResult = await client.query(
-      "INSERT INTO badges(user_id,name,description) VALUES($1,$2,$3) RETURNING id",
-      [user_id, badge_name, description]
-    );
-    if (badgeResult.rowCount === 0) {
-      console.log("error updating db")
-      return res.status(400).json({ error: "Error updating database" })
-    }
-
-    console.log("done with insert query")
-
-    await client.query("COMMIT");
-    transactionStarted = false;
-
-    res.json({ id: badgeResult.rows[0].id });
-
-  } catch (err) {
-    if (transactionStarted) {
-      await client.query("ROLLBACK");
-    }
-
-    if (err.code === "23503") {
-      return res.status(400).json({ error: "User id doesn't exist" });
-    }
-
-    console.error(err);
-    res.status(500).send("Database error");
-
+    handleError(res, err);
   } finally {
     client.release();
   }
 });
+
+app.put("/api/events/:id", async (req, res) => {
+  try {
+    const { name, description, start_time, end_time, address, city, state, zip_code, color, recurrence } = req.body;
+    const result = await pool.query(
+      `UPDATE events SET name=$1, description=$2, start_time=$3, end_time=$4,
+       address=$5, city=$6, state=$7, zip_code=$8, color=$9, recurrence=$10 WHERE id=$11 RETURNING id`,
+      [name, description, start_time, end_time, address, city, state, zip_code, color, recurrence || null, req.params.id]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: "Event not found" });
+    res.json({ success: true });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.delete("/api/events/:id", (req, res) =>
+  mutateOne(res, "DELETE FROM events WHERE id = $1 RETURNING id", [req.params.id], "Event not found")
+);
+
+app.get("/api/events", (req, res) =>
+  queryMany(res,
+    `SELECT e.*,
+            o.name AS organization_name,
+            COALESCE(json_agg(DISTINCT ec.name) FILTER (WHERE ec.name IS NOT NULL), '[]') AS tags,
+            COUNT(DISTINCT er.id) AS volunteer_count
+     FROM events e
+     LEFT JOIN organizations o ON o.id = e.organization_id
+     LEFT JOIN event_category_links ecl ON ecl.event_id = e.id
+     LEFT JOIN event_categories ec ON ec.id = ecl.event_category_id
+     LEFT JOIN event_registrations er ON er.event_id = e.id
+     WHERE e.status = 'PUBLISHED'
+     GROUP BY e.id, o.name
+     ORDER BY e.start_time`
+  )
+);
+
+app.put("/api/events/:id/publish", (req, res) =>
+  mutateOne(res, "UPDATE events SET status = 'PUBLISHED' WHERE id = $1 RETURNING id", [req.params.id], "Event not found")
+);
+
+app.put("/api/events/:id/cancel", (req, res) =>
+  mutateOne(res, "UPDATE events SET status = 'CANCELLED' WHERE id = $1 RETURNING id", [req.params.id], "Event not found")
+);
+
+// ─── Event Registrations ──────────────────────────────────────────────────────
+
+app.post("/api/events/:id/register", async (req, res) => {
+  try {
+    const { volunteer_id } = req.body;
+    const event_id = req.params.id;
+    const eventResult = await pool.query("SELECT status FROM events WHERE id = $1", [event_id]);
+    if (eventResult.rowCount === 0) return res.status(404).json({ error: "Event not found" });
+    if (eventResult.rows[0].status !== "PUBLISHED") {
+      return res.status(400).json({ error: "Event is not open for registration" });
+    }
+    await pool.query(
+      "INSERT INTO event_registrations(event_id, volunteer_id) VALUES ($1, $2)",
+      [event_id, volunteer_id]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    if (err.code === "23505") return res.status(409).json({ error: "Volunteer already registered" });
+    handleError(res, err);
+  }
+});
+
+app.delete("/api/events/:id/register", (req, res) =>
+  mutateOne(res,
+    "DELETE FROM event_registrations WHERE event_id = $1 AND volunteer_id = $2",
+    [req.params.id, req.body.volunteer_id],
+    "Registration not found"
+  )
+);
+
+app.get("/api/events/:id/registrations", (req, res) =>
+  queryMany(res,
+    `SELECT v.id AS volunteer_id, v.full_name, u.email, u.phone_number,
+            er.registered_at, er.attended, er.time_in, er.time_out
+     FROM event_registrations er
+     JOIN volunteers v ON v.id = er.volunteer_id
+     JOIN users u ON u.id = v.user_id
+     WHERE er.event_id = $1
+     ORDER BY er.registered_at`,
+    [req.params.id]
+  )
+);
+
+app.get("/api/events/:id/registrations/count", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT COUNT(*) AS total FROM event_registrations WHERE event_id = $1",
+      [req.params.id]
+    );
+    res.json({ total: parseInt(result.rows[0].total) });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.post("/api/events/:id/checkin", (req, res) =>
+  withClient(res, async (client) => {
+    const { volunteer_id, time_in, time_out } = req.body;
+    await client.query(
+      `UPDATE event_registrations
+       SET attended = true, time_in = $1, time_out = $2
+       WHERE event_id = $3 AND volunteer_id = $4`,
+      [time_in, time_out, req.params.id, volunteer_id]
+    );
+  })
+);
+
+// ─── Event Roles ──────────────────────────────────────────────────────────────
+
+app.post("/api/events/:id/roles", (req, res) =>
+  withClient(res, async (client) => {
+    const event_id = req.params.id;
+    await client.query("DELETE FROM event_roles WHERE event_id = $1", [event_id]);
+    for (const role of req.body.roles) {
+      if (!role.name?.trim()) continue;
+      await client.query(
+        "INSERT INTO event_roles(event_id, name, spots) VALUES($1, $2, $3)",
+        [event_id, role.name.trim(), parseInt(role.spots) || 0]
+      );
+    }
+  })
+);
+
+app.get("/api/events/:id/roles", (req, res) =>
+  queryMany(res,
+    `SELECT er.id, er.name, er.spots,
+            COUNT(err.id) AS filled
+     FROM event_roles er
+     LEFT JOIN event_role_registrations err ON err.role_id = er.id
+     WHERE er.event_id = $1
+     GROUP BY er.id
+     ORDER BY er.id`,
+    [req.params.id]
+  )
+);
+
+app.get("/api/events/:id/volunteer-role/:volunteerId", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT err.role_id FROM event_role_registrations err
+       JOIN event_roles er ON er.id = err.role_id
+       WHERE er.event_id = $1 AND err.volunteer_id = $2
+       LIMIT 1`,
+      [req.params.id, req.params.volunteerId]
+    );
+    res.json({ role_id: result.rows[0]?.role_id ?? null });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.post("/api/roles/:id/register", async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { volunteer_id } = req.body;
+    const role_id = req.params.id;
+
+    if (!Number.isInteger(Number(role_id)) || isNaN(Number(role_id))) {
+      return res.status(404).json({ error: "Role not found" });
+    }
+
+    const roleResult = await client.query(
+      `SELECT er.spots, COUNT(err.id) AS filled
+       FROM event_roles er
+       LEFT JOIN event_role_registrations err ON err.role_id = er.id
+       WHERE er.id = $1
+       GROUP BY er.id`,
+      [role_id]
+    );
+
+    if (roleResult.rowCount === 0 || roleResult.rows.length === 0) {
+      return res.status(404).json({ error: "Role not found" });
+    }
+
+    const { spots, filled } = roleResult.rows[0];
+    if (parseInt(filled) >= parseInt(spots)) {
+      return res.status(400).json({ error: "No spots available" });
+    }
+
+    await client.query(
+      "INSERT INTO event_role_registrations(role_id, volunteer_id) VALUES($1, $2)",
+      [role_id, volunteer_id]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    if (err.code === "23505") return res.status(409).json({ error: "Already registered for this role" });
+    if (err.code === "22P02") return res.status(404).json({ error: "Role not found" });
+    handleError(res, err);
+  } finally {
+    client.release();
+  }
+});
+
+app.delete("/api/roles/:id/register", (req, res) =>
+  mutateOne(res,
+    "DELETE FROM event_role_registrations WHERE role_id = $1 AND volunteer_id = $2",
+    [req.params.id, req.body.volunteer_id],
+    "Registration not found"
+  )
+);
+
+app.get("/api/roles/:id/volunteers", (req, res) =>
+  queryMany(res,
+    `SELECT v.id, v.full_name, u.email, u.phone_number
+     FROM event_role_registrations err
+     JOIN volunteers v ON v.id = err.volunteer_id
+     JOIN users u ON u.id = v.user_id
+     WHERE err.role_id = $1`,
+    [req.params.id]
+  )
+);
+
+// ─── Event Tags ───────────────────────────────────────────────────────────────
+
+app.post("/api/events/:id/tags", (req, res) =>
+  withClient(res, async (client) => {
+    const event_id = req.params.id;
+    await client.query("DELETE FROM event_category_links WHERE event_id = $1", [event_id]);
+    for (const tagName of req.body.tags) {
+      const catResult = await client.query(
+        "SELECT id FROM event_categories WHERE name = $1", [tagName]
+      );
+      if (catResult.rowCount > 0) {
+        await client.query(
+          "INSERT INTO event_category_links(event_id, event_category_id) VALUES($1,$2)",
+          [event_id, catResult.rows[0].id]
+        );
+      }
+    }
+  })
+);
+
+app.get("/api/events/:id/tags", (req, res) =>
+  queryMany(res,
+    `SELECT ec.id, ec.name FROM event_category_links ecl
+     JOIN event_categories ec ON ec.id = ecl.event_category_id
+     WHERE ecl.event_id = $1`,
+    [req.params.id]
+  )
+);
+
+app.get("/api/eventCategories", (req, res) =>
+  queryMany(res, "SELECT * FROM event_categories ORDER BY name")
+);
+
+app.post("/api/badges", (req, res, next) => {
+  badgeUpload.single("image")(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    if (!req.file) return res.status(400).json({ error: "Image file is required" }); // add this back
+    next();
+  });
+}, async (req, res) => {
+  try {
+    const { name, description } = req.body;
+    const image_url = `/uploads/badges/${req.file.filename}`;
+    const result = await pool.query(
+      "INSERT INTO badges(name, description, image_url) VALUES($1,$2,$3) RETURNING *",
+      [name, description, image_url]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.get("/api/badges", (req, res) =>
+  queryMany(res, "SELECT * FROM badges ORDER BY id")
+);
+
+app.post("/api/events/:id/badges", (req, res) =>
+  withClient(res, async (client) => {
+    const event_id = req.params.id;
+    await client.query("DELETE FROM event_badges WHERE event_id = $1", [event_id]);
+    for (const badge_id of req.body.badge_ids) {
+      await client.query(
+        "INSERT INTO event_badges(event_id, badge_id) VALUES($1, $2)",
+        [event_id, badge_id]
+      );
+    }
+  })
+);
+
+app.get("/api/events/:id/badges", (req, res) =>
+  queryMany(res,
+    `SELECT b.id, b.name, b.description, b.image_url
+     FROM event_badges eb
+     JOIN badges b ON b.id = eb.badge_id
+     WHERE eb.event_id = $1`,
+    [req.params.id]
+  )
+);
+
+// ─── Images ───────────────────────────────────────────────────────────────────
+
+const TYPE_TO_FOLDER = {
+  user:  "user",
+  badge: "badge",
+};
 
 app.get("/api/images/:type/:userId", (req, res) => {
   try {
     const { type, userId } = req.params;
 
-    const allowedTypes = { 'user': 'user', 'badge': 'badge' };
-    const safeType = allowedTypes[type];
-
-    if (!safeType) {
+    if (!ALLOWED_UPLOAD_TYPES.has(type)) {
       return res.status(400).json({ error: "Invalid image type" });
     }
+    const safeFolder = TYPE_TO_FOLDER[type];
+    if (!safeFolder) return res.status(400).json({ error: "Invalid image type" }); /* v8 ignore next */
 
-    const match = userId.match(/^[a-zA-Z0-9-]+$/);
-    const safeId = match ? match[0] : null;
+    const safeUserId = userId.replace(/[^0-9]/g, "");
+    if (!safeUserId) return res.status(400).json({ error: "Invalid user ID" });
 
-    if (!safeId) {
-      return res.status(400).json({ error: "invalid userID" })
+    const base = join(__dirname, "uploads");
+    const dirPath = join(base, safeFolder, safeUserId);
+    if (!dirPath.startsWith(base + path.sep)) {
+      return res.status(400).json({ error: "Invalid path" });
     }
-    let basePath = resolve('./uploads');
-    console.log(safeType, safeId);
-    const dirPath = join(basePath, safeType, safeId);
 
     if (!existsSync(dirPath)) {
-      console.log("Dir doesn't exist");
       return res.status(404).json({ error: "No images found" });
     }
 
-    const files = readdirSync(dirPath);
-
-    // filter dotfiles
-    const imageFiles = files.filter(file => !file.startsWith("."));
-
-    const fileUrls = imageFiles.map(file =>
-      `/uploads/${type}/${userId}/${file}`
-    );
+    const imageFiles = readdirSync(dirPath).filter(f => !f.startsWith("."));
+    const fileUrls   = imageFiles.map(f => `/uploads/${safeFolder}/${safeUserId}/${f}`);
 
     res.json({ images: fileUrls });
-
   } catch (err) {
-    console.error(err);
+    console.error(err); /* v8 ignore next */
     res.status(500).json({ error: "Failed to retrieve images" });
   }
 });

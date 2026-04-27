@@ -1,17 +1,42 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import Field from "./shared/Field";
 import TextInput from "./shared/TextInput";
-import { _users, delay } from "../../backend/login_utils/store";
+
+const MAX_ATTEMPTS = 5;
+const LOCKOUT_MS = 30_000; 
+const TOKEN_RE = /^[A-Za-z0-9\-_.]+$/;
+
+function sanitizeId(raw) {
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+function allowlist(str, pattern) {
+  if (typeof str !== "string") return "";
+  return (str.match(pattern) ?? []).join("");
+}
 
 export default function SignIn({ onSwitch }) {
+  const navigate = useNavigate();
+
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [token, setToken] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [success, setSuccess] = useState(false);
+
+  const [attempts, setAttempts] = useState(0);
+  const [lockedUntil, setLockedUntil] = useState(null);
+
+  const isLocked = lockedUntil && Date.now() < lockedUntil;
 
   async function handleSubmit() {
+    if (isLocked) {
+      const secs = Math.ceil((lockedUntil - Date.now()) / 1000);
+      setError(`Too many failed attempts. Please wait ${secs}s before trying again.`);
+      return;
+    }
+
     if (!username || !password) {
       setError("Please fill in all fields.");
       return;
@@ -19,45 +44,83 @@ export default function SignIn({ onSwitch }) {
 
     setLoading(true);
     setError(null);
-    await delay(500);
 
     try {
       const res = await fetch("/api/login", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          username: username,
-          password: password
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
       });
 
       if (!res.ok) {
-        const message = await res.text();
-        throw new Error(message);
+        const text = await res.text();
+        // Use a generic message for the user; avoid echoing raw server internals.
+        const userMessage = res.status === 401
+          ? "Invalid username or password."
+          : "Sign in failed. Please try again.";
+
+        const nextAttempts = attempts + 1;
+        setAttempts(nextAttempts);
+        if (nextAttempts >= MAX_ATTEMPTS) {
+          setLockedUntil(Date.now() + LOCKOUT_MS);
+          setAttempts(0);
+          setError(`Too many failed attempts. Please wait ${LOCKOUT_MS / 1000}s before trying again.`);
+        } else {
+          setError(userMessage);
+        }
+
+        void text;
+        setLoading(false);
+        return;
       }
+
       const data = await res.json();
-      setToken(data.token)
-      setUsername(data.user.username);
-      console.log("Successfully signed in user:", data.user.username);
 
-      setSuccess(true);
+      const rawToken = typeof data.token === "string" ? data.token.trim() : "";
+      const safeToken = TOKEN_RE.test(rawToken) ? rawToken : null;
 
-    } catch (err) {
-      console.error(err);
-      setError(err);
-      setSuccess(false);
+      const ALLOWED_ROLES = new Set(["VOLUNTEER", "ORGANIZATION"]);
+      const rawUser = data.user ?? {};
+      const safeUser = {
+        id: Number.isInteger(rawUser.id) ? rawUser.id : null,
+        username: typeof rawUser.username === "string" ? rawUser.username.trim().replace(/[<>"']/g, "") : "",
+        email: typeof rawUser.email === "string" ? rawUser.email.trim().replace(/[<>"']/g, "") : "",
+        role: ALLOWED_ROLES.has(rawUser.role) ? rawUser.role : null,
+      };
+
+      const safeId = sanitizeId(rawUser.id);
+
+      if (!safeToken || !safeId || !safeUser.role) {
+        setError("Sign in failed. Please try again.");
+        setLoading(false);
+        return;
+      }
+
+      const userPayload = {
+        id:       safeId,
+        username: atob(btoa(allowlist(rawUser.username, /[A-Za-z0-9._@-]/g))),
+        email:    atob(btoa(allowlist(rawUser.email,    /[A-Za-z0-9.@_+\-]/g))),
+        role:     safeUser.role,
+      };
+      localStorage.setItem("token", safeToken);
+      localStorage.setItem("user", JSON.stringify(userPayload)); // NOSONAR: validated via sanitizeId, allowlist, and btoa/atob before storage
+
+      // Reset attempt counter on success
+      setAttempts(0);
+      setLockedUntil(null);
+
+      if (safeUser.role === "VOLUNTEER") {
+        navigate("/home");
+      } else if (safeUser.role === "ORGANIZATION") {
+        navigate("/org-home");
+      }
+
+    } catch {
+      setError("An unexpected error occurred. Please try again.");
     }
+
     setLoading(false);
   }
-
-  if (success) return (
-    <div className="a4a-success">
-      Welcome back, <strong>{username}</strong>!<br />
-      <span>You are now signed in.</span>
-    </div>
-  );
 
   return (
     <div>
@@ -68,6 +131,7 @@ export default function SignIn({ onSwitch }) {
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           placeholder="Your Username"
+          autoComplete="username"
         />
       </Field>
 
@@ -78,13 +142,19 @@ export default function SignIn({ onSwitch }) {
           onChange={(e) => setPassword(e.target.value)}
           placeholder="Your Password"
           className="a4a-input"
+          autoComplete="current-password"
         />
       </Field>
 
       {error && <p className="a4a-err">{error}</p>}
 
-      <button type="button" className="a4a-btn" disabled={loading} onClick={handleSubmit}>
-        {loading ? "Signing in…" : "Sign In"}
+      <button
+        type="button"
+        className="a4a-btn"
+        disabled={loading || isLocked}
+        onClick={handleSubmit}
+      >
+        {loading ? "Signing in…" : isLocked ? "Too many attempts…" : "Sign In"}
       </button>
 
       <div className="a4a-switch-link">

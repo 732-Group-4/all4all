@@ -83,7 +83,7 @@ export default function VolunteerForm({ onSwitch }) {
                     firstName: firstName.val,
                     lastName: lastName.val,
                     phone: phoneRaw,
-                    zip: zip
+                    zip_code: zip
                 }),
             });
 
