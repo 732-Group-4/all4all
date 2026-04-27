@@ -763,3 +763,16 @@ describe("Database error mocking - Register endpoints", () => {
     expect(res.statusCode).toBe(500);
   });
 });
+
+describe("GET /api/users/:id/avatar - integration", () => {
+  it("returns 400 for non-numeric user id in images route", async () => {
+    const res = await request(app).get("/api/images/user/abc");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/invalid user id/i);
+  });
+
+  it("DELETE /api/users/:id/avatar returns 400 for non-numeric id", async () => {
+    const res = await request(app).delete("/api/users/abc/avatar");
+    expect(res.status).toBe(400);
+  });
+});

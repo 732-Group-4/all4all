@@ -1054,17 +1054,18 @@ function EventModal({ event, orgId, brandColors = [], onClose, onSaved }) {
                   </div>
                   <button
                     onClick={async () => {
-                        if (!newBadgeName.trim()) return;
+                        if (!newBadgeName.trim()) {
+                          return;
+                        }
                         const fd = new FormData();
                         fd.append("name", newBadgeName);
                         fd.append("description", newBadgeDesc);
                         if (newBadgeFile) fd.append("image", newBadgeFile);
-
                         try {
                           const res = await fetch("/api/badges", { method: "POST", body: fd });
                           if (!res.ok) throw new Error(`Badge creation failed: ${res.status}`);
                           const badge = await res.json();
-                          console.log("Badge response:", badge);
+                          console.log("Badge created successfully");
                           if (!badge?.id) throw new Error("No badge ID returned");
                           setAvailableBadges(prev => [...prev, badge]);
                           setSelectedBadges(prev => new Set([...prev, badge.id]));
@@ -1072,11 +1073,10 @@ function EventModal({ event, orgId, brandColors = [], onClose, onSaved }) {
                           setNewBadgeDesc("");
                           setNewBadgeFile(null);
                         } catch (err) {
-                          console.error("Badge creation error:", err);
-                          // Optionally surface this to the user via setSubmitErr
+                          console.error("Badge creation error:", err.message);
                           setSubmitErr("Failed to create badge. Please try again.");
                         }
-                      }}
+                    }}
                     style={{
                       background: "#15803d", color: "#fff", border: "none", borderRadius: 8,
                       padding: "8px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",

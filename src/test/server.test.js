@@ -1464,3 +1464,71 @@ describe("GET /api/organizations/profile", () => {
     expect(res.status).toBe(404);
   });
 });
+
+// Lines 547–555 — GET /api/users/:id/avatar
+describe("GET /api/users/:id/avatar", () => {
+  it("returns image_url for a user", async () => {
+    pool.query.mockResolvedValueOnce({ rowCount: 1, rows: [{ image_url: "/uploads/profiles/1/test.jpg" }] });
+    const res = await request.get("/api/users/1/avatar");
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty("image_url");
+  });
+
+  it("returns 404 when user not found", async () => {
+    pool.query.mockResolvedValueOnce({ rowCount: 0, rows: [] });
+    const res = await request.get("/api/users/999/avatar");
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 500 on db error", async () => {
+    pool.query.mockRejectedValueOnce(new Error("db error"));
+    const res = await request.get("/api/users/1/avatar");
+    expect(res.status).toBe(500);
+  });
+});
+
+// Lines 560–587 — DELETE /api/users/:id/avatar
+describe("DELETE /api/users/:id/avatar", () => {
+  it("returns 404 when user not found", async () => {
+    pool.query.mockResolvedValueOnce({ rowCount: 0, rows: [] });
+    const res = await request.delete("/api/users/999/avatar");
+    expect(res.status).toBe(404);
+  });
+
+  it("clears avatar successfully with no existing file", async () => {
+    pool.query.mockResolvedValueOnce({ rowCount: 1, rows: [{ image_url: null }] });
+    pool.query.mockResolvedValueOnce({ rows: [] });
+    const res = await request.delete("/api/users/1/avatar");
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+
+  it("returns 500 on db error", async () => {
+    pool.query.mockRejectedValueOnce(new Error("db error"));
+    const res = await request.delete("/api/users/1/avatar");
+    expect(res.status).toBe(500);
+  });
+
+  it("DELETE /api/users/:id/avatar clears avatar when image_url exists", async () => {
+    pool.query.mockResolvedValueOnce({ rowCount: 1, rows: [{ image_url: "/uploads/profiles/1/profile_123.jpg" }] });
+    pool.query.mockResolvedValueOnce({ rows: [] }); // UPDATE SET NULL
+    const res = await request.delete("/api/users/1/avatar");
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+
+  it("returns 404 when role does not exist", async () => {
+    mockClient({ rows: [], rowCount: 0 }); // add rowCount: 0
+    const res = await request.post("/api/roles/999/register").send({ volunteer_id: 10 });
+    expect(res.status).toBe(404);
+  });
+
+  it("POST /api/events/:id/checkin returns 500 on db error", async () => {
+    const client = mockClient();
+    client.query.mockRejectedValueOnce(new Error("Database error"));
+    const res = await request.post("/api/events/1/checkin").send({
+      volunteer_id: 10, time_in: "2026-06-01T09:05:00", time_out: null,
+    });
+    expect(res.status).toBe(500);
+  });
+});
